@@ -1,0 +1,7 @@
+#!/bin/bash -x
+
+# Usage fake_parameters <parameters> <anchors>
+
+numlines=`wc -l $2 | awk '{print $1}'`
+let ANCHORS=$numlines/2
+cat $1 | awk -v anchors=$ANCHORS '{if (NR==3 || NR==4) {print $1"\t"anchors} else if (NR==5)  {print $1"\t1"} else{print $0}}'

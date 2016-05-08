@@ -1,0 +1,12 @@
+#!/bin/bash -x
+
+#Define binaries for asm wrapper
+#Define origin of files, this has to be edited manually, must be absolute paths
+
+module load GCC
+export BIN=/path/to/bin
+export WRAPPER=/this/path
+export MAFFT=/path/to/mafft
+
+export JIP_PATH=$WRAPPER:$WRAPPER/tools:$JIP_PATH
+export PATH=$WRAPPER:$WRAPPER/tools:$BIN:$MAFFT:$WRAPPER/scripts:$PATH

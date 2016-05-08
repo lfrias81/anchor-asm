@@ -1,0 +1,463 @@
+#! jip
+# Usage:
+#   make_directories -a <anchor-values>... --asm-dir <asm-dir>
+#
+# Inputs:
+#   --asm-dir <asm-dir>                  assembly directory
+#
+# Options:
+#   -a <anchor-values>...                      anchor sizes
+
+
+#!/bin/bash -x 
+
+
+MINCOVERAGE=2
+MINPAIRCOVERAGE=2
+MINOUTBLOCK=250
+ANCHORSIZE=1000
+INDELMAX=4 #percentage
+debug=0
+MEMORY=3600000000 #for local machine
+ANCHORCHUNK=$MEMORY/64
+VARIANT="filtered"
+OUTDIVIDE=1
+TRIM=0
+CONSENSUS=0
+LOOSE=0
+MAXCARDINALITY=32
+INPUTAREPOOLS=0
+JOINRATIO="0.5"
+DEPTHREPEAT=30
+CONTEXTREPEAT=20
+GREEDYCOMPACTATION=1
+
+
+BINDIR=
+OUTDIR=
+PREFIXNAME=
+WHAT=
+while getopts “hb:o:n:m:a:z:c:C:f:g:d:r:s:p:y:j:k:l:w:v:x:” OPTION
+do
+     case $OPTION in
+         h)
+             usage
+             exit 1
+             ;;
+         b)
+             BINDIR=$OPTARG
+             ;;
+         o)
+             OUTDIR=$OPTARG
+             ;;
+         n)
+             PREFIXNAME=$OPTARG
+             ;;
+         m)
+             MEMORY=$OPTARG
+	     let ANCHORCHUNK=$MEMORY/64
+             ;; 
+         a)
+             ANCHORSIZE=$OPTARG 
+             ;;            
+	 z)
+             MINANCHORSIZE=$OPTARG 
+             ;;          
+         c)
+             MINCOVERAGE=$OPTARG 
+	     MINPAIRCOVERAGE=$MINCOVERAGE
+             ;;         
+	 C)
+             MINPAIRCOVERAGE=$OPTARG 
+             ;;  
+	 f)
+             MINOUTBLOCK=$OPTARG 
+             ;;  		 
+	 g)
+             INDELMAX=$OPTARG 
+             ;;  
+	 d)
+	     OUTDIVIDE=$OPTARG
+	     ;;
+	 r) 
+	     TRIM=$OPTARG
+             ;;
+	 s)
+	     CONSENSUS=$OPTARG
+             ;;
+	 p) 
+	     INPUTAREPOOLS=$OPTARG
+	     ;;
+	 y)
+	     GREEDYCOMPACTATION=$OPTARG
+	     ;;
+	 j)
+	     JOINRATIO=$OPTARG
+	     ;;
+	 k)
+	     DEPTHREPEAT=$OPTARG
+	     ;;
+	 l)  
+	     CONTEXTREPEAT=$OPTARG
+	     ;;
+         w)
+             WHAT=$OPTARG
+	     ;;
+	 v)
+             VARIANT=$OPTARG
+             ;;
+	 x)
+	     MAXCARDINALITY=$OPTARG
+	     ;;
+         ?)
+             usage
+             exit
+             ;;
+     esac
+done
+
+
+#BINDIR and OUTDIR are relative directories
+
+function debug_pileup {
+	$BINDIR/gem-aaa_id-table-coherence-test $OUTDIR/order.pileup >> $LOGFILE 
+	$BINDIR/gem-aaa_id-table-coherence-test $OUTDIR/order.pileup.inverse >> $LOGFILE 
+	$BINDIR/gem-aaa_components-coherence-test $OUTDIR/components >> $LOGFILE 
+	$BINDIR/gem-aaa_align-coherence-test $OUTDIR/reads $OUTDIR/alignments >> $LOGFILE 
+	$BINDIR/gem-aaa_anchor-coherence-test $OUTDIR/alignments.orig $OUTDIR/anchors >> $LOGFILE 
+}
+
+function enrich_anchor {
+  mv $OUTDIR/alignments.orig $OUTDIR/alignments.orig.old
+  $BINDIR/gem-aaa_add-anchors-for-uncovered $OUTDIR/reads $OUTDIR/alignments.orig.old $OUTDIR/alignments.orig
+}
+
+function pileup { 
+	$BINDIR/gem-aaa_pileup $OUTDIR/reads $OUTDIR/alignments.orig  $OUTDIR/order.pileup $OUTDIR/components $OUTDIR/read-positions $OUTDIR/anchors $OUTDIR/alignments >> $LOGFILE 
+	if [ $debug -eq 1 ] ; then debug_pileup ; fi
+}
+
+function debug_dictator {
+	$BINDIR/gem-aaa_id-table-coherence-test $OUTDIR/order.anchors	 >> $LOGFILE 
+	$BINDIR/gem-aaa_anchor-coherence-test $OUTDIR/alignments.orig $OUTDIR/distances.anchors	 >> $LOGFILE 
+	$BINDIR/gem-aaa_offsets-coherence-test $OUTDIR/components.anchors >> $LOGFILE 
+}
+
+function predemux {
+  $BINDIR/gem-aaa_dictator $OUTDIR/anchors $OUTDIR/alignments  $OUTDIR/order.pileup.inverse $OUTDIR/components $OUTDIR/order.anchors $OUTDIR/distances.anchors $OUTDIR/components.anchors >> $LOGFILE 
+  $BINDIR/gem-aaa_fascist -i $OUTDIR -m $MEMORY >> $LOGFILE 
+}
+
+function debug_links {
+	$BINDIR/gem-aaa_links-coherence-test $1 >> $LOGFILE 
+}
+
+function debug_block_graph {
+	$BINDIR/gem-aaa_id-table-coherence-test $OUTDIR/$1-table >> $LOGFILE 
+	$BINDIR/gem-aaa_pileup-coherence-test $OUTDIR/reads $OUTDIR/$1-table $OUTDIR/$1-pileup >> $LOGFILE 
+	debug_links $OUTDIR/$1-block-links >> $LOGFILE 
+}
+
+function compact_graph {
+	PREFIX=$1
+	MASK=$2
+	if [ $debug -eq 1 ]; then debug_links $OUTDIR/$PREFIX-anchor-links; fi
+	$BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-anchor-links $OUTDIR/$PREFIX-merged-anchor-links  $ANCHORCHUNK >> $LOGFILE
+	if [ $debug -eq 1 ]; then debug_links $OUTDIR/$PREFIX-merged-anchor-links; fi
+	$BINDIR/gem-aaa_block1-graph-1-1 $OUTDIR/alignments.orig $OUTDIR/$PREFIX-merged-anchor-links $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-block-links $OUTDIR/$PREFIX-anchor2block $MASK 0  >> $LOGFILE
+	if [ $debug -eq 1 ]; then debug_block_graph $PREFIX; fi
+	$BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-block-links $OUTDIR/$PREFIX-links  $ANCHORCHUNK >> $LOGFILE
+	if [ $debug -eq 1 ]; then debug_links $OUTDIR/$PREFIX-links; fi
+}
+
+function remove_pure_tips_all {
+    PREFIX=$1
+    $BINDIR/gem-aaa_remove-tips $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-links $OUTDIR/$PREFIX-notips-expanded-links $OUTDIR/$PREFIX-blocks2keep 1 $MINCOVERAGE $TRIM  >> $LOGFILE
+    $BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-notips-expanded-links $OUTDIR/$PREFIX-notips-expanded-merged-links $ANCHORCHUNK >> $LOGFILE
+    $BINDIR/gem-aaa_block1-graph-1-1 $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-notips-expanded-merged-links $OUTDIR/$PREFIX-notips-block-table $OUTDIR/$PREFIX-notips-block-pileup $OUTDIR/$PREFIX-notips-blocks-info $OUTDIR/$PREFIX-notips-block-links $OUTDIR/$PREFIX-notips-block2block $OUTDIR/$PREFIX-blocks2keep 1 >> $LOGFILE
+    $BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-notips-block-links $OUTDIR/$PREFIX-notips-links  $ANCHORCHUNK >> $LOGFILE
+    if [ $2 = 1 ]; then
+	$BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-anchor2block $OUTDIR/$PREFIX-notips-blocks-info $OUTDIR/$PREFIX-notips-block-table $OUTDIR/$PREFIX-notips-block-pileup $OUTDIR/$PREFIX-notips-block2block $OUTDIR/$PREFIX-notips-table $OUTDIR/$PREFIX-notips-pileup $OUTDIR/$PREFIX-notips-anchor2block >> $LOGFILE
+   else
+	 $BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-notips-blocks-info $OUTDIR/$PREFIX-notips-block-table $OUTDIR/$PREFIX-notips-block-pileup  $OUTDIR/$PREFIX-notips-table $OUTDIR/$PREFIX-notips-pileup >> $LOGFILE
+   fi
+}
+
+function remove_pure_tips {
+    remove_pure_tips_all $1 1
+}
+
+function clean_graph_all {
+	PREFIX=$1
+	remove_pure_tips_all $1 $2
+	PREFIX=$1"-notips"
+	LIB=$3
+	$BINDIR/gem-aaa_clean-graph $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-links $OUTDIR/$PREFIX-nobubble0-expanded-links $OUTDIR/$PREFIX-blocks2keep 1 $3  1 1 $INDELMAX $ANCHORSIZE 0 >> $LOGFILE
+	let ARTIFACTDIS=($ANCHORSIZE+99)/100
+	$BINDIR/gem-aaa_join-equivalent-blocks $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-nobubble0-expanded-links $OUTDIR/$PREFIX-nobubble0-noartifact-links $OUTDIR/$PREFIX-noartifact-blocks2keep 1 $ARTIFACTDIS  >> $LOGFILE
+	$BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-nobubble0-noartifact-links $OUTDIR/$PREFIX-nobubble0-noartifact-merged-links $ANCHORCHUNK >> $LOGFILE
+	$BINDIR/gem-aaa_merge-mask-table $OUTDIR/$PREFIX-blocks2keep  $OUTDIR/$PREFIX-noartifact-blocks2keep $OUTDIR/$PREFIX-noartifact-all-blocks2keep
+#	cp $PREFIX-nobubble0-expanded-links $OUTDIR/$PREFIX-nobubble0-noartifact-merged-links
+#	cp $OUTDIR/$PREFIX-blocks2keep $OUTDIR/$PREFIX-noartifact-all-blocks2keep
+	$BINDIR/gem-aaa_block1-graph-1-1 $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-nobubble0-noartifact-merged-links $OUTDIR/$PREFIX-nobubble0-block-table $OUTDIR/$PREFIX-nobubble0-block-pileup $OUTDIR/$PREFIX-nobubble0-blocks-info $OUTDIR/$PREFIX-nobubble0-block-links $OUTDIR/$PREFIX-nobubble0-block2block $OUTDIR/$PREFIX-noartifact-all-blocks2keep 1 >> $LOGFILE	
+	$BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-nobubble0-block-links $OUTDIR/$PREFIX-nobubble0-links  $ANCHORCHUNK >> $LOGFILE
+	if [ $2 = 1 ]; then
+            $BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-anchor2block $OUTDIR/$PREFIX-nobubble0-blocks-info $OUTDIR/$PREFIX-nobubble0-block-table $OUTDIR/$PREFIX-nobubble0-block-pileup $OUTDIR/$PREFIX-nobubble0-block2block $OUTDIR/$PREFIX-nobubble0-table $OUTDIR/$PREFIX-nobubble0-pileup $OUTDIR/$PREFIX-nobubble0-anchor2block >> $LOGFILE
+	else
+            $BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-nobubble0-blocks-info $OUTDIR/$PREFIX-nobubble0-block-table $OUTDIR/$PREFIX-nobubble0-block-pileup $OUTDIR/$PREFIX-nobubble0-table $OUTDIR/$PREFIX-nobubble0-pileup  >> $LOGFILE
+	fi
+	$BINDIR/gem-aaa_graph1-stats $OUTDIR/$PREFIX-nobubble0-table $OUTDIR/$PREFIX-nobubble0-blocks-info $OUTDIR/$PREFIX-nobubble0-links $OUTDIR/$PREFIX-nobubble0-in-out-stats $OUTDIR/$PREFIX-nobubble0-degree-stats $OUTDIR/$PREFIX-nobubble0-length-stats $OUTDIR/$PREFIX-nobubble0-degree-length-stats	 $OUTDIR/$PREFIX-nobubble0-coverage-stats >> $LOGFILE
+	$BINDIR/gem-aaa_clean-graph $OUTDIR/$PREFIX-nobubble0-blocks-info $OUTDIR/$PREFIX-nobubble0-links $OUTDIR/$PREFIX-nobubble-expanded-links $OUTDIR/$PREFIX-nobubble0-blocks2keep 1 $3  $MINCOVERAGE $INPUTAREPOOLS $INDELMAX $ANCHORSIZE $TRIM >> $LOGFILE
+	$BINDIR/gem-aaa_block1-graph-1-1 $OUTDIR/$PREFIX-nobubble0-blocks-info $OUTDIR/$PREFIX-nobubble-expanded-links $OUTDIR/$PREFIX-nobubble-block-table $OUTDIR/$PREFIX-nobubble-block-pileup $OUTDIR/$PREFIX-nobubble-blocks-info $OUTDIR/$PREFIX-nobubble-block-links $OUTDIR/$PREFIX-nobubble-block2block $OUTDIR/$PREFIX-nobubble0-blocks2keep 1 >> $LOGFILE	
+	$BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-nobubble-block-links $OUTDIR/$PREFIX-nobubble-links  $ANCHORCHUNK >> $LOGFILE
+	if [ $2 = 1 ]; then
+	    $BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-nobubble0-blocks-info $OUTDIR/$PREFIX-nobubble0-table $OUTDIR/$PREFIX-nobubble0-pileup $OUTDIR/$PREFIX-nobubble0-anchor2block $OUTDIR/$PREFIX-nobubble-blocks-info $OUTDIR/$PREFIX-nobubble-block-table $OUTDIR/$PREFIX-nobubble-block-pileup $OUTDIR/$PREFIX-nobubble-block2block $OUTDIR/$PREFIX-nobubble-table $OUTDIR/$PREFIX-nobubble-pileup $OUTDIR/$PREFIX-nobubble-anchor2block >> $LOGFILE
+	else
+	    $BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-nobubble0-blocks-info $OUTDIR/$PREFIX-nobubble0-table $OUTDIR/$PREFIX-nobubble0-pileup  $OUTDIR/$PREFIX-nobubble-blocks-info $OUTDIR/$PREFIX-nobubble-block-table $OUTDIR/$PREFIX-nobubble-block-pileup $OUTDIR/$PREFIX-nobubble-table $OUTDIR/$PREFIX-nobubble-pileup  >> $LOGFILE
+	fi
+	$BINDIR/gem-aaa_graph1-stats $OUTDIR/$PREFIX-nobubble-table $OUTDIR/$PREFIX-nobubble-blocks-info $OUTDIR/$PREFIX-nobubble-links $OUTDIR/$PREFIX-nobubble-in-out-stats $OUTDIR/$PREFIX-nobubble-degree-stats $OUTDIR/$PREFIX-nobubble-length-stats $OUTDIR/$PREFIX-nobubble-degree-length-stats	 $OUTDIR/$PREFIX-nobubble-coverage-stats >> $LOGFILE
+}
+
+function clean_graph {
+    clean_graph_all $1 "1" $2
+}
+
+function basic_demux {
+	$BINDIR/gem-aaa_demux  $OUTDIR/alignments.orig $OUTDIR/distances.anchors $OUTDIR/components.anchors $OUTDIR/alignments.sorted $OUTDIR/components $OUTDIR/base-anchor-links >> $LOGFILE
+    compact_graph "base" ""
+    #clean_graph "base"
+}
+
+function filtered_demux {	
+	let ANCHORPLUSINDEL=$ANCHORSIZE+$INDELMAX;
+	BASE=base
+	$BINDIR/gem-aaa_create-filtered-anchors  $OUTDIR/reads  $OUTDIR/alignments.orig $OUTDIR/$BASE-anchor2block $OUTDIR/$BASE-blocks-info $OUTDIR/$BASE-links $OUTDIR/anchors-mask $INDELMAX $MAXCARDINALITY $MINCOVERAGE 
+	$BINDIR/gem-aaa_filtered-demux $OUTDIR/anchors-mask $OUTDIR/distances.anchors $OUTDIR/components.anchors $OUTDIR/alignments.sorted $OUTDIR/components $OUTDIR/filtered-anchor-links >> $LOGFILE
+	compact_graph "filtered" $OUTDIR/anchors-mask
+	clean_graph "filtered" ""
+}
+
+
+function demux {
+ basic_demux
+ filtered_demux
+#  clean_graph "filtered"
+}
+
+
+
+function rough_scaffold {
+        PREFIX=$1
+	$BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-links $OUTDIR/$PREFIX-pair-links $OUTDIR/$PREFIX-expanded-with-pairs-links $OUTDIR/$PREFIX-libraries-deviation $MINPAIRCOVERAGE $ANCHORSIZE $ANCHORCHUNK
+	$BINDIR/gem-aaa_block1-graph-1-1 $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-expanded-with-pairs-links $OUTDIR/$PREFIX-with-pairs-block-table $OUTDIR/$PREFIX-with-pairs-block-pileup $OUTDIR/$PREFIX-with-pairs-blocks-info $OUTDIR/$PREFIX-with-pairs-block-links $OUTDIR/$PREFIX-with-pairs-block2block $2 1 >> $LOGFILE	
+	$BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-with-pairs-block-links $OUTDIR/$PREFIX-with-pairs-links $ANCHORCHUNK >> $LOGFILE
+	$BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-anchor2block $OUTDIR/$PREFIX-with-pairs-blocks-info $OUTDIR/$PREFIX-with-pairs-block-table $OUTDIR/$PREFIX-with-pairs-block-pileup $OUTDIR/$PREFIX-with-pairs-block2block $OUTDIR/$PREFIX-with-pairs-table $OUTDIR/$PREFIX-with-pairs-pileup $OUTDIR/$PREFIX-with-pairs-anchor2block >> $LOGFILE
+	#clean bubbles and block
+	clean_graph $PREFIX-with-pairs ""
+	cp $OUTDIR/*-repeats-anchors $OUTDIR/$PREFIX-notips-nobubble-repeats-anchors
+}
+
+function pair_links_from_scaffolds {
+        PREFIX=$1
+    	$BINDIR/gem-aaa_agp2pairs $OUTDIR/scaffolds.agp $OUTDIR/pair-read-links $MINANCHORSIZE
+   
+        $BINDIR/gem-aaa_add-pair-links $OUTDIR/reads $OUTDIR/alignments.orig $OUTDIR/anchors-mask $OUTDIR/pair-read-links $OUTDIR/$PREFIX-blocks-info   $OUTDIR/$PREFIX-links $OUTDIR/$PREFIX-anchor2block $OUTDIR/$PREFIX-pair-translated-links $OUTDIR/$PREFIX-read-pair-translated-links $OUTDIR/$PREFIX-libraries-counts  $ANCHORSIZE 1 1
+        $BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-pair-translated-links $OUTDIR/$PREFIX-pair-links $ANCHORCHUNK
+
+}
+
+function add_pair_links_from_scaffolds {
+        PREFIX=$1
+        #add pairs                                                                                      
+    	pair_links_from_scaffolds $PREFIX 
+	rough_scaffold $PREFIX ""
+}
+
+function pair_links_from_libraries {
+    PREFIX=$1
+    $BINDIR/gem-aaa_add-pair-links $OUTDIR/reads $OUTDIR/alignments.orig $OUTDIR/anchors-mask $OUTDIR/libraries $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-links $OUTDIR/$PREFIX-anchor2block $OUTDIR/$PREFIX-pair-translated-links $OUTDIR/$PREFIX-read-pair-translated-links $OUTDIR/$PREFIX-libraries-counts  $ANCHORSIZE 1 0
+    $BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-pair-translated-links $OUTDIR/$PREFIX-pair-links $ANCHORCHUNK
+}
+  
+
+function add_pair_links_from_libraries {
+    PREFIX=$1
+    pair_links_from_libraries $PREFIX
+    rough_scaffold $PREFIX ""
+}
+
+
+function repeat_resolution {
+  PREFIX=$1
+  if [ $2 -eq 0 ]; then
+    pair_links_from_libraries $PREFIX
+  else
+    pair_links_from_scaffolds $PREFIX
+  fi
+  $BINDIR/gem-aaa_links-standard-deviation $OUTDIR/$PREFIX-pair-translated-links $OUTDIR/$PREFIX-pair-links $OUTDIR/$PREFIX-libraries-deviation
+  $BINDIR/gem-aaa_read-repeat-resolution $OUTDIR/reads  $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-links $OUTDIR/$PREFIX-pair-links $OUTDIR/$PREFIX-read-pair-translated-links $OUTDIR/$PREFIX-blocks-info $OUTDIR/alignments.orig $OUTDIR/$PREFIX-norepeat-byread-block-table $OUTDIR/$PREFIX-norepeat-byread-block-pileup $OUTDIR/$PREFIX-norepeat-byread-links $OUTDIR/$PREFIX-norepeat-byread-blocks-info $OUTDIR/$PREFIX-norepeat-byread-block2block  $OUTDIR/$PREFIX-libraries-deviation $INDELMAX $MINCOVERAGE $MINPAIRCOVERAGE $MINOUTBLOCK $DEPTHREPEAT $CONTEXTREPEAT $GREEDYCOMPACTATION >> $LOGFILE
+  $BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-anchor2block $OUTDIR/$PREFIX-norepeat-byread-blocks-info $OUTDIR/$PREFIX-norepeat-byread-block-table $OUTDIR/$PREFIX-norepeat-byread-block-pileup $OUTDIR/$PREFIX-norepeat-byread-block2block $OUTDIR/$PREFIX-norepeat-byread-table $OUTDIR/$PREFIX-norepeat-byread-pileup $OUTDIR/$PREFIX-norepeat-byread-anchor2block $OUTDIR/$PREFIX-flatten-norepeat-byread-repeats-anchors  >> $LOGFILE
+  $BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-norepeat-byread-links $OUTDIR/$PREFIX-norepeat-byread-merged-links $ANCHORCHUNK >> $LOGFILE
+  $BINDIR/gem-aaa_block1-graph-1-1 $OUTDIR/$PREFIX-norepeat-byread-blocks-info $OUTDIR/$PREFIX-norepeat-byread-merged-links $OUTDIR/$PREFIX-flatten-norepeat-byread-block-table $OUTDIR/$PREFIX-flatten-norepeat-byread-block-pileup $OUTDIR/$PREFIX-flatten-norepeat-byread-blocks-info $OUTDIR/$PREFIX-flatten-norepeat-byread-block-links $OUTDIR/$PREFIX-flatten-norepeat-byread-block2block 1 >> $LOGFILE	
+  $BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-flatten-norepeat-byread-block-links $OUTDIR/$PREFIX-flatten-norepeat-byread-lib-links $ANCHORCHUNK >> $LOGFILE
+  $BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-norepeat-byread-blocks-info $OUTDIR/$PREFIX-norepeat-byread-table $OUTDIR/$PREFIX-norepeat-byread-pileup $OUTDIR/$PREFIX-norepeat-byread-anchor2block $OUTDIR/$PREFIX-flatten-norepeat-byread-blocks-info $OUTDIR/$PREFIX-flatten-norepeat-byread-block-table $OUTDIR/$PREFIX-flatten-norepeat-byread-block-pileup $OUTDIR/$PREFIX-flatten-norepeat-byread-block2block $OUTDIR/$PREFIX-flatten-norepeat-byread-table $OUTDIR/$PREFIX-flatten-norepeat-byread-pileup $OUTDIR/$PREFIX-flatten-norepeat-byread-anchor2block >> $LOGFILE
+  cp $OUTDIR/$PREFIX-libraries-deviation $OUTDIR/$PREFIX-flatten-norepeat-byread-notips-nobubble-libraries-deviation
+  cp $OUTDIR/$PREFIX-flatten-norepeat-byread-repeats-anchors $OUTDIR/$PREFIX-flatten-norepeat-byread-notips-nobubble-repeats-anchors
+  $BINDIR/gem-aaa_compact-library-links  $OUTDIR/$PREFIX-flatten-norepeat-byread-notips-nobubble-libraries-deviation $OUTDIR/$PREFIX-flatten-norepeat-byread-lib-links   $OUTDIR/$PREFIX-flatten-norepeat-byread-links $MINCOVERAGE
+  clean_graph $PREFIX-flatten-norepeat-byread $OUTDIR/$PREFIX-libraries-deviation
+}
+
+function remove_library_links {
+  PREFIX=$1
+  cp $PREFIX-links $PREFIX-all-links
+  $BINDIR/gem-aaa_clean-library-links $PREFIX-all-links $PREFIX-links
+  clean_graph $PREFIX ""
+}
+
+function solve {
+  PREFIX=$1
+  PREFIXREPEAT=$PREFIX-flatten-norepeat-byread-notips-nobubble
+  $BINDIR/gem-aaa_select-branch-greedy $OUTDIR/$PREFIXREPEAT-blocks-info $OUTDIR/$PREFIXREPEAT-links $OUTDIR/$PREFIX-libraries-counts  $OUTDIR/$PREFIXREPEAT-chosen-links $JOINRATIO >> $LOGFILE
+  $BINDIR/gem-aaa_block1-graph-1-1 $OUTDIR/$PREFIXREPEAT-blocks-info $OUTDIR/$PREFIXREPEAT-chosen-links $OUTDIR/$PREFIXREPEAT-solved-block-table $OUTDIR/$PREFIXREPEAT-solved-block-pileup $OUTDIR/$PREFIXREPEAT-solved-blocks-info $OUTDIR/$PREFIXREPEAT-solved-block-links $OUTDIR/$PREFIXREPEAT-solved-block2block 1 >> $LOGFILE	
+  $BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIXREPEAT-solved-block-links $OUTDIR/$PREFIXREPEAT-solved-links $ANCHORCHUNK >> $LOGFILE
+  $BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIXREPEAT-blocks-info $OUTDIR/$PREFIXREPEAT-table $OUTDIR/$PREFIXREPEAT-pileup $OUTDIR/$PREFIXREPEAT-anchor2block $OUTDIR/$PREFIXREPEAT-solved-blocks-info $OUTDIR/$PREFIXREPEAT-solved-block-table $OUTDIR/$PREFIXREPEAT-solved-block-pileup $OUTDIR/$PREFIXREPEAT-solved-block2block $OUTDIR/$PREFIXREPEAT-solved-table $OUTDIR/$PREFIXREPEAT-solved-pileup $OUTDIR/$PREFIXREPEAT-solved-anchor2block >> $LOGFILE
+  cp $OUTDIR/$PREFIXREPEAT-repeats-anchors $OUTDIR/$PREFIXREPEAT-solved-repeats-anchors
+ # clean_graph $PREFIXREPEAT-solved $OUTDIR/$PREFIXREPEAT-libraries-deviation
+}
+
+function cutblocks {
+    let MINTERMINAL=$MINOUTBLOCK 
+	PREFIX=$1
+	REPEATSFILE=$2   
+	$BINDIR/gem-aaa_blocks-by-position $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-links $OUTDIR/$PREFIX-overlapping-ends-offsets $OUTDIR/$PREFIX-non-overlapping-lengths  $OUTDIR/$PREFIX-classes-links $OUTDIR/$PREFIX-positions2classes >> $LOGFILE
+	$BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-classes-links $OUTDIR/$PREFIX-expanded-merged-classes-links $ANCHORCHUNK	>> $LOGFILE
+#       $BINDIR/gem-aaa_basic-cut $OUTDIR/$PREFIX-expanded-merged-classes-links  $OUTDIR/$PREFIX-simplified-merged-classes-links
+	mv $OUTDIR/$PREFIX-expanded-merged-classes-links $OUTDIR/$PREFIX-simplified-merged-classes-links
+	$BINDIR/gem-aaa_block1-graph-1-1 $OUTDIR/$PREFIX-non-overlapping-lengths  $OUTDIR/$PREFIX-simplified-merged-classes-links  $OUTDIR/$PREFIX-classes-table $OUTDIR/$PREFIX-classes-pileup $OUTDIR/$PREFIX-non-overlapping-blocks-info $OUTDIR/$PREFIX-non-overlapping-block-links $OUTDIR/$PREFIX-classes2blocks 2  >> $LOGFILE
+	$BINDIR/gem-aaa_merge-links $OUTDIR/$PREFIX-non-overlapping-block-links $OUTDIR/$PREFIX-non-overlapping-links $ANCHORCHUNK	>> $LOGFILE
+	$BINDIR/gem-aaa_non-overlapping-blocks $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-overlapping-ends-offsets $OUTDIR/$PREFIX-non-overlapping-lengths $OUTDIR/$PREFIX-positions2classes $OUTDIR/$PREFIX-non-overlapping-links $OUTDIR/$PREFIX-classes2blocks  $OUTDIR/$PREFIX-non-overlapping-block-table  $OUTDIR/$PREFIX-non-overlapping-block-pileup >> $LOGFILE
+#	$BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-non-overlapping-blocks-info $OUTDIR/$PREFIX-non-overlapping-block-table $OUTDIR/$PREFIX-non-overlapping-block-pileup $OUTDIR/$PREFIX-non-overlapping-table $OUTDIR/$PREFIX-non-overlapping-pileup >> $LOGFILE
+	$BINDIR/gem-aaa_block2anchor-pileup $OUTDIR/alignments.orig $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-anchor2block $OUTDIR/$PREFIX-non-overlapping-blocks-info $OUTDIR/$PREFIX-non-overlapping-block-table $OUTDIR/$PREFIX-non-overlapping-block-pileup  $OUTDIR/$PREFIX-classes2blocks $OUTDIR/$PREFIX-non-overlapping-table $OUTDIR/$PREFIX-non-overlapping-pileup $OUTDIR/$PREFIX-non-overlapping-anchor2block >> $LOGFILE
+	#$BINDIR/gem-aaa_blocks2fasta $OUTDIR/reads $OUTDIR/alignments.orig $OUTDIR/$PREFIX-non-overlapping-table $OUTDIR/$PREFIX-non-overlapping-pileup $OUTDIR/$PREFIX-non-overlapping-blocks-info $OUTDIR/$PREFIX-sequence-by-block.fasta $OUTDIR/$PREFIX-coverage-by-block.fasta $OUTDIR/$PREFIX-reads-by-block $MINOUTBLOCK >> $LOGFILE
+#	clean_graph_all $PREFIX"-non-overlapping" 0
+#	PREFIX=$PREFIX"-non-overlapping-notips-nobubble" 
+	PREFIX=$PREFIX"-non-overlapping"
+	CONTEXT=$(($ANCHORSIZE/100 + 5))
+	$BINDIR/gem-aaa_blocks2fasta $OUTDIR/reads $OUTDIR/alignments.orig $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-blocks-info $OUTDIVIDE $OUTDIR/$PREFIX-sequence-by-block.fasta $OUTDIR/$PREFIX-coverage-by-block.fasta $OUTDIR/$PREFIX-reads-by-block $REPEATSFILE $MINOUTBLOCK $CONTEXT $MINTERMINAL $CONSENSUS  >> $LOGFILE
+	$BINDIR/gem-aaa_graph1-stats $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-links $OUTDIR/$PREFIX-in-out-stats $OUTDIR/$PREFIX-degree-stats $OUTDIR/$PREFIX-length-stats $OUTDIR/$PREFIX-degree-length-stats	 $OUTDIR/$PREFIX-coverage-stats >> $LOGFILE
+}
+
+function blocks2fasta {
+    PREFIX=$1
+    REPEATSFILE=$2
+    MINTERMINAL=$MINOUTBLOCK
+    let CONTEXT=$ANCHORSIZE/100 + 5
+   $BINDIR/gem-aaa_blocks2fasta $OUTDIR/reads $OUTDIR/alignments.orig $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-blocks-info $OUTDIVIDE $OUTDIR/$PREFIX-sequence-by-block.fasta $OUTDIR/$PREFIX-coverage-by-block.fasta $OUTDIR/$PREFIX-reads-by-block $REPEATSFILE $MINOUTBLOCK $CONTEXT $MINTERMINAL $CONSENSUS >> $LOGFILE
+}
+
+function terminals {
+  PREFIX=$1
+  let region=$ANCHORSIZE - 1;
+  let newanchor=$ANCHORSIZE/2;
+  $BINDIR/gem-aaa_terminal-reads2fasta $OUTDIR/reads $OUTDIR/alignments.orig $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-blocks-info $OUTDIR/terminal-anchors.fasta $OUTDIR/terminal-reads $region $newanchor >> $LOGFILE	
+}
+
+function explorer {
+  PREFIX=$1
+  $BINDIR/gem-aaa_explorer1 $OUTDIR/reads $OUTDIR/alignments.orig $OUTDIR/$PREFIX-table $OUTDIR/$PREFIX-pileup $OUTDIR/$PREFIX-blocks-info $OUTDIR/$PREFIX-links
+}
+
+# $VARIANT can be base or filtered
+function core {
+# enrich_anchor
+ pileup 
+ predemux
+ demux
+# cutblocks $VARIANT"-notips-nobubble"
+ repeat_resolution $VARIANT"-notips-nobubble" $INPUTAREPOOLS
+ cutblocks $VARIANT"-notips-nobubble-flatten-norepeat-byread-notips-nobubble" $VARIANT"-notips-nobubble-flatten-norepeat-byread-notips-nobubble-repeats-anchors"
+}
+
+function scaffold {
+   if  [ $2 -eq 0 ]; then
+    add_pair_links_from_libraries  $1
+  else
+    add_pair_links_from_scaffolds $1
+  fi
+}
+
+
+function core_tips {
+ pileup
+ predemux
+ basic_demux
+ remove_pure_tips "base"
+}
+
+
+
+
+#num_params=$#              # Number of command-line parameters.
+
+
+
+if [[ -z $BINDIR ]] || [[ -z $OUTDIR ]] || [[ -z $PREFIXNAME ]]
+then
+     usage
+     exit 1
+fi
+
+if [[ -z $MINANCHORSIZE ]]
+then
+     MINANCHORSIZE=$ANCHORSIZE
+fi
+
+
+LOGFILE=`echo "$PREFIXNAME.log"`
+
+#Apply results
+rm -rf $LOGFILE
+
+if [[ -z $WHAT ]]; then 
+		core
+else
+  if [ $WHAT = "pileup" ]; then
+	pileup
+  elif [ $WHAT = "predemux" ]; then
+	predemux
+  elif  [ $WHAT = "demux" ]; then
+	demux 
+  elif  [ $WHAT = "cutblocks" ]; then
+	cutblocks $VARIANT ""
+  elif  [ $WHAT = "cutblocks-repeats" ]; then
+#      blocks2fasta $VARIANT $VARIANT-repeats-anchors
+       cutblocks $VARIANT $VARIANT-repeats-anchors
+  elif  [ $WHAT = "blocks2fasta" ]; then
+      blocks2fasta $VARIANT ""
+  elif  [ $WHAT = "blocks2fasta-repeats" ]; then
+      blocks2fasta $VARIANT $VARIANT-repeats-anchors  
+  elif  [ $WHAT = "explorer" ]; then
+	explorer  $VARIANT
+  elif  [ $WHAT = "terminals" ]; then
+	terminals  $VARIANT
+  elif  [ $WHAT = "repeats" ]; then
+	repeat_resolution $VARIANT $INPUTAREPOOLS
+  elif [ $WHAT = "tips" ]; then
+        core_tips  
+  elif [ $WHAT = "tips-only" ]; then
+        remove_pure_tips "base"
+  elif [ $WHAT = "scaffold" ]; then
+      scaffold $VARIANT $INPUTAREPOOLS
+  elif [ $WHAT = "clean" ]; then
+      clean_graph $VARIANT "" 
+  elif [ $WHAT = "clean-repeats" ]; then
+      clean_graph $VARIANT-flatten-norepeat-byread $VARIANT-libraries-deviation
+  elif [ $WHAT = "solve" ]; then
+      solve $VARIANT
+  elif [ $WHAT = "remove-libs" ]; then
+      remove_library_links $VARIANT
+  else
+    usage
+    exit 1
+  fi
+fi

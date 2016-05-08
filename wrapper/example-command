@@ -1,0 +1,1 @@
+anchor_assembly_config.py --json-file config.json --asm-directory test --anchor 40 --min-anchor 20 --divergence 0.01 --input-scaffolds lala.fa lala.agp --min-out-scaffold 20

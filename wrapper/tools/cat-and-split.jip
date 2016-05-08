@@ -1,0 +1,41 @@
+#! jip
+# Usage:
+#   cat-and-split --chunks-input <chunks> --chunks-output <chunks> --prefix-input <name-input> --prefix-output <name-output> 
+#
+# Options:
+#	--prefix-input <name-input>...		List of names of files to cat
+#   --chunks-input <chunks-input>            	Number of chunks to join
+#   --chunks-output <chunks-output>            Number of chunks to split
+#   --prefix-output <name-output>  		Name for the output
+#
+
+
+#%begin init
+add_output('output')
+add_option('input')
+#%end
+
+#%begin setup
+list_of_outputs = []
+for i in range(int(str(chunks_output))):
+  list_of_outputs.append(prefix_output+"-"+str(i))
+options['output'].set(list_of_outputs)
+list_of_inputs = []
+for i in range(int(str(chunks_input))):
+  list_of_inputs.append(prefix_input+"-"+str(i))
+options['input'].set(list_of_inputs)
+#%end
+
+#%command
+
+cat ${input} | fastaSplit.py -s ${chunks_output} -o ${prefix_output}
+
+let end=${chunks_output}-1
+for i in $(seq 0 $end); do
+  mv ${prefix_output}_$i.fa ${prefix_output}-$i
+done
+  
+
+
+
+          

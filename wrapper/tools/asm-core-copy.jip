@@ -1,0 +1,604 @@
+#! jip
+#
+# Usage:
+#   asm-core --workdir <workdir> --tmpdir <tmpdir> [--reads <reads>] [--alignments-orig <alignments>] [--bindir <bindir>] [--logname <logname>] [-a <anchor>] [--min-anchor <min-anchor>]
+#			 [--scaffolds-as-input] [--hub-cardinality <cardinality>] [-c <coverage>] [--trim <trim>] 
+#			 [--max-distance-diff <percentage>] [--repeat-resolution-depth <depth>] [--path-expansion-depth <depth>] 
+#			 [--path-selection-ratio <ratio>] [--consensus-type <consensus-type>] [--min-out-scaffold <min-out-scaffold>] 
+#			 [--output-chunks <output-chunks> ] [-m <memory>] --module <module> [--prefix <prefix>]	 	
+#
+# Inputs:
+#	  --reads <file>							Binary file containing the reads
+#												[default: ${workdir}/reads]
+#	  --alignments-orig							Binary file containing the alignments
+#												[default: alignments.orig]
+#	  --workdir <workdir>						Path of the directory where the script must be run
+#	  --tmpdir <workdir>						Path of the directory for temporary files
+#	  --bindir <bindir>	 						Optional path directories to search for the binaries
+#
+# Outputs:
+#	  --logname <logname>						The logname file
+#												[default: ${workdir}/asm.log]
+#
+# Options: 
+#	  -a, --anchor <anchor>						Anchor size
+# 	  --min-anchor <min-anchor> 				Min anchor size
+#												[default: ${anchor}]
+#	  --scaffolds-as-input						Input to the assembly are scaffolds		
+#												[default: true]
+#	  --hub-cardinality <cardinality>			Node cardinality to be considered a hub, and so candidate to be removed		
+#												[default: 16]							
+#	  -c, --coverage <coverage> 				Min coverage to keep a tip or singleton
+#												[default: 2]
+#     --trim <trim>								Max length for a tip to be trimmed independent of coverage
+#												[default: ${min_anchor}]
+#	  --max-distance-diff <percentage>			Maximum distance difference (in 1) for two paths to be equivalent
+#												[default: 0.04]
+#	  --repeat-resolution-depth <depth>			Repeat resolution maximum search depth
+#												[default: 4]
+#	  --path-expansion-depth <depth>			Try to expand a path at most till depth
+#												[default: 10]
+#	  --path-selection-ratio <ratio>			Minimum coverage ratio to select a path, with respect to another.
+#												[default: 0.5]
+#	  --consensus-type <consensus-type>			Consensus type: 'majority' | 'longest'
+#												[default: 'majority']
+# 	  --min-out-scaffold <min-out-scaffold>		Min output scaffold
+#												[default: 200]
+#	  --output-chunks <output-chunks>			Num output chunks
+#												[default: 1]
+#     -m, --memory <memory>	 					Max memory available in GB
+#							 					[default: 4]
+#	  --module <module>							Which module needs to be executed. Can be any of: 'pileup', 'notips-graph', 'simplified-graph', 
+#													'clean', 'clean-repeats', 'remove-tips', 'repeats', 'scaffold', 'solve', cutblocks',
+#													'cutblocks-repeats', 'remove-paired-links' 'blocks2fasta', 'blocks2fasta-repeats', 
+#													'explorer', 'terminals', 'core-pipeline', 'stats'
+#	  --prefix <prefix>							Prefix name for input
+
+#%begin init
+
+## TODO: add additional inputs and outputs, I just added the essential to communicate 
+##### Inputs and output that depend on the operation (the results (which depend on the prefix))
+
+#The programs use a percentage, instead of adding an option, it would be better to change the program
+add_option('max_distance_diff_perc')
+
+add_option('input_table', None, 1, False)
+add_option('input_pileup', None, 1, False)
+add_option('input_blocks_info', None, 1, False)
+
+add_option('output_alignments', None, 1, False)
+add_option('output_table', None, 1, False)
+add_option('output_pileup', None, 1, False)
+add_option('output_blocks_info', None, 1, False)
+
+# Register outputs
+add_output("output_fasta", None, 1, False)
+
+add_option("output_prefix", None, 1, False)
+
+#%end
+
+#%begin setup
+
+def add_basic_inputs(options, pref_dir):
+	options['input_table'].set("${workdir}/" + pref_dir  + "-table")
+	options['input_pileup'].set("${workdir}/" + pref_dir  + "-pileup")
+	options['input_blocks_info'].set("${workdir}/" + pref_dir + "-blocks-info")
+
+def add_basic_outputs(options, pref_dir):
+	options['output_prefix'].set(pref_dir)
+	options['output_table'].set("${workdir}/" + pref_dir + "-table")
+	options['output_pileup'].set("${workdir}/" + pref_dir + "-pileup")
+	options['output_blocks_info'].set("${workdir}/" + pref_dir + "-blocks-info")
+
+
+def add_fasta_output(options,prefix_output, chunks):
+	list_of_outputs = []
+	for c in range(int(str(chunks))):
+		list_of_outputs.append(prefix_output + "-sequence-by-block.fasta"+ str(c))
+	options['output_fasta'].set(list_of_outputs)
+
+dirpre = "${prefix}" 
+
+if module == "pileup":
+	options['output_alignments'].set("${workdir}/alignments")
+elif module == "simplified-graph":
+	add_basic_outputs(options, "filtered-nobubble")
+elif module == "clean" :
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-nobubble")
+elif module == "clean-repeats":
+	add_basic_inputs(options, dirpre + "-norepeats")
+	add_basic_outputs(options, dirpre+ "-norepeats-nobubble")
+elif module == "remove-tips":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-notips")
+elif module == "repeats":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-norepeats-nobubble")
+elif module == "scaffold":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-with-pairs-nobubble")
+elif module == "solve":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-solved")
+elif module == "cutblocks" or module == "cutblocks-repeats":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-non-overlapping")
+	add_fasta_output(options, dirpre+ "-non-overlapping", output_chunks)
+elif module == "remove-paired-links":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-nobubble")
+elif module == "blocks2fasta" or module == "blocks2fasta-repeats":
+	add_basic_inputs(options, dirpre)
+	add_fasta_output(options, dirpre, output_chunks)
+elif module == "explorer":
+	add_basic_inputs(options, dirpre)
+elif module	== "terminals":
+	add_basic_inputs(options, dirpre)
+elif module == "notips-graph":
+	add_basic_outputs(options, "base-notips")
+elif module == "core-pipeline":
+	add_basic_outputs(options, dirpre+ "-nobubble-norepeats-nobubble-non-overlapping")
+	add_fasta_output(options, dirpre+ "-nobubble-norepeats-nobubble-non-overlapping", output_chunks)
+elif module == "stats":
+	add_basic_inputs(options, dirpre)
+
+
+
+
+# Set variables in terms of others
+options['memory'] = options['memory'].get(int) * 1024 * 1024 * 1024
+if not options['min_anchor']:
+	options['min_anchor'] = options['anchor']
+if not options['trim']:
+	options['trim']=options['min_anchor']
+if not options['consensus_type']:
+	options['consensus_type']='majority'
+
+options['max_distance_diff_perc'].set(int(options['max_distance_diff'].get(float)*100))
+
+#%end
+
+
+#%begin validate
+# Check the option is valid
+not_is_valid=module.get() != "pileup" and module.get()!='notips-graph' and module.get()!='simplified-graph' and module.get()!='clean' and module.get()!='clean-repeats' and module.get()!='remove-tips' and module.get()!='repeats' and module.get()!='scaffold' and module.get()!='solve' and module.get()!='cutblocks' and module.get()!='cutblocks-repeats' and module.get()!='remove-paired-links' and module.get()!='blocks2fasta' and module.get()!='blocks2fasta-repeats' and module.get()!='explorer' and module.get()!='terminals' and module.get()!='core-pipeline' and module.get()!='stats'
+if not_is_valid:
+    validation_error("Not valid module")
+
+#%end
+
+#%command
+
+#### 0. Manipulate parameters
+# Set path if defined
+if [[ -n "${bindir}" ]]; then
+ 	export PATH=${bindir}:$PATH
+fi
+
+# # Set anchorchunk parameter
+anchorchunk=${memory}/64
+debug=0 # Deactivate debug, it could be added as an external parameter
+
+
+function enrich_anchor {
+  mv ${alignments_orig} ${alignments_orig}.old
+  gem-aaa_add-anchors-for-uncovered ${workdir}/reads ${alignments_orig}.old ${alignments_orig}
+}
+
+function debug_pileup {
+	gem-aaa_id-table-coherence-test ${workdir}/order.pileup >> ${logname} 
+	gem-aaa_id-table-coherence-test ${workdir}/order.pileup.inverse >> ${logname} 
+	gem-aaa_components-coherence-test ${workdir}/components >> ${logname} 
+	gem-aaa_align-coherence-test ${reads} ${workdir}/alignments >> ${logname} 
+	gem-aaa_anchor-coherence-test ${alignments_orig} ${workdir}/anchors >> ${logname} 
+}
+
+function pileup { 
+	gem-aaa_pileup ${reads} ${alignments_orig}  ${workdir}/order.pileup ${workdir}/components ${workdir}/read-positions ${workdir}/anchors ${workdir}/alignments >> ${logname} 
+	if [ $debug -eq 1 ] ; then debug_pileup ; fi
+}
+
+function debug_dictator {
+	gem-aaa_id-table-coherence-test ${workdir}/order.anchors	 >> ${logname} 
+	gem-aaa_anchor-coherence-test ${alignments_orig} ${workdir}/distances.anchors	 >> ${logname} 
+	gem-aaa_offsets-coherence-test ${workdir}/components.anchors >> ${logname} 
+}
+
+function predemux {
+  gem-aaa_dictator ${workdir}/anchors ${workdir}/alignments  ${workdir}/order.pileup.inverse ${workdir}/components ${workdir}/order.anchors ${workdir}/distances.anchors ${workdir}/components.anchors >> ${logname} 
+  gem-aaa_fascist -i ${workdir} -m ${memory} >> ${logname} 
+  # Check correction of operation before deleting file
+  if [ $? -eq 0 ];  then 
+  	rm ${workdir}/alignments
+  	rm ${workdir}/order.pileup.*
+  	rm ${workdir}/order.anchors
+  fi
+}
+
+function debug_links {
+	gem-aaa_links-coherence-test $1 >> ${logname} 
+}
+
+function debug_block_graph {
+	gem-aaa_id-table-coherence-test ${workdir}/$1-table >> ${logname} 
+	gem-aaa_pileup-coherence-test ${reads} ${workdir}/$1-table ${workdir}/$1-pileup >> ${logname} 
+	debug_links ${workdir}/$1-block-links >> ${logname} 
+}
+
+function compact_graph {
+	PREFIX=$1
+	MASK=$2
+	if [ $debug -eq 1 ]; then debug_links ${workdir}/$PREFIX-anchor-links; fi
+	gem-aaa_merge-links ${workdir}/$PREFIX-anchor-links ${workdir}/$PREFIX-merged-anchor-links  ${anchorchunk} >> ${logname}
+	if [ $debug -eq 1 ]; then debug_links ${workdir}/$PREFIX-merged-anchor-links; fi
+	gem-aaa_block1-graph-1-1 ${alignments_orig} ${workdir}/$PREFIX-merged-anchor-links ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-block-links ${workdir}/$PREFIX-anchor2block $MASK 0  >> ${logname}
+	if [ $debug -eq 1 ]; then debug_block_graph $PREFIX; fi
+	gem-aaa_merge-links ${workdir}/$PREFIX-block-links ${workdir}/$PREFIX-links  ${anchorchunk} >> ${logname}
+	last_op=$?
+	if [ $debug -eq 1 ]; then debug_links ${workdir}/$PREFIX-links; fi
+	# Check correction of operation before deleting file
+  	if [ $last_op -eq 0 ];  then 
+  		rm ${workdir}/$PREFIX-merged-anchor-links
+  		rm ${workdir}/$PREFIX-block-links
+  	fi
+}
+
+function remove_pure_tips_all {
+    PREFIX=$1
+    gem-aaa_remove-tips ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-links ${workdir}/$PREFIX-notips-expanded-links ${workdir}/$PREFIX-blocks2keep 1 ${coverage} ${trim}  >> ${logname}
+    gem-aaa_merge-links ${workdir}/$PREFIX-notips-expanded-links ${workdir}/$PREFIX-notips-expanded-merged-links ${anchorchunk} >> ${logname}
+    gem-aaa_block1-graph-1-1 ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-notips-expanded-merged-links ${workdir}/$PREFIX-notips-block-table ${workdir}/$PREFIX-notips-block-pileup ${workdir}/$PREFIX-notips-blocks-info ${workdir}/$PREFIX-notips-block-links ${workdir}/$PREFIX-notips-block2block ${workdir}/$PREFIX-blocks2keep 1 >> ${logname}
+    gem-aaa_merge-links ${workdir}/$PREFIX-notips-block-links ${workdir}/$PREFIX-notips-links  ${anchorchunk} >> ${logname}
+    if [ $2 = 1 ]; then
+		gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-anchor2block ${workdir}/$PREFIX-notips-blocks-info ${workdir}/$PREFIX-notips-block-table ${workdir}/$PREFIX-notips-block-pileup ${workdir}/$PREFIX-notips-block2block ${workdir}/$PREFIX-notips-table ${workdir}/$PREFIX-notips-pileup ${workdir}/$PREFIX-notips-anchor2block >> ${logname}
+ 		last_op=$?
+    else
+		gem-aaa_block2anchor-pileup ${alignments_orig}${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-notips-blocks-info ${workdir}/$PREFIX-notips-block-table ${workdir}/$PREFIX-notips-block-pileup  ${workdir}/$PREFIX-notips-table ${workdir}/$PREFIX-notips-pileup >> ${logname}
+    	last_op=$?
+    fi
+   	# Check correction of operation before deleting file
+   	if [ $last_op -eq 0 ];  then 
+   		rm ${workdir}/$PREFIX-notips-expanded-links 
+   		rm ${workdir}/$PREFIX-notips-expanded-merged-links
+   		rm ${workdir}/$PREFIX-notips-block-table
+   		rm ${workdir}/$PREFIX-notips-block-pileup
+   		rm ${workdir}/$PREFIX-notips-block-links
+   		rm ${workdir}/$PREFIX-notips-block2block
+   		rm ${workdir}/$PREFIX-blocks2keep
+   	fi
+}
+
+function remove_pure_tips {
+    remove_pure_tips_all $1 1
+}
+
+function stats {
+	PREFIX=$1
+	gem-aaa_graph1-stats ${workdir}/${PREFIX}-table ${workdir}/${PREFIX}-blocks-info ${workdir}/${PREFIX}-links ${workdir}/${PREFIX}-in-out-stats ${workdir}/${PREFIX}-degree-stats ${workdir}/${PREFIX}-length-stats ${workdir}/${PREFIX}-degree-length-stats	 ${workdir}/${PREFIX}-coverage-stats ${workdir}/${PREFIX}-all-lengths >> ${logname}
+}
+
+function clean_graph_all {
+	PREFIX=$1
+	remove_pure_tips_all $1 $2
+	PREFIX=$1"-notips"
+	PREFIXOUT=$1"-nobubble"
+	LIB=$3
+	gem-aaa_clean-graph ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-links ${workdir}/${PREFIXOUT}0-expanded-links ${workdir}/$PREFIX-blocks2keep 1 $3 1 1 ${max_distance_diff_perc} ${anchor} 0 >> ${logname}
+	
+	let ARTIFACTDIS=(${anchor}+99)/100
+	gem-aaa_join-equivalent-blocks ${workdir}/$PREFIX-blocks-info ${workdir}/${PREFIXOUT}0-expanded-links ${workdir}/${PREFIXOUT}0-noartifact-links ${workdir}/$PREFIX-noartifact-blocks2keep 1 $ARTIFACTDIS  >> ${logname}
+	gem-aaa_merge-links ${workdir}/${PREFIXOUT}0-noartifact-links ${workdir}/${PREFIXOUT}0-noartifact-merged-links ${anchorchunk} >> ${logname}
+	gem-aaa_merge-mask-table ${workdir}/$PREFIX-blocks2keep  ${workdir}/$PREFIX-noartifact-blocks2keep ${workdir}/$PREFIX-noartifact-all-blocks2keep
+#	cp ${PREFIXOUT}0-expanded-links ${workdir}/${PREFIXOUT}0-noartifact-merged-links
+#	cp ${workdir}/$PREFIX-blocks2keep ${workdir}/$PREFIX-noartifact-all-blocks2keep
+	gem-aaa_block1-graph-1-1 ${workdir}/$PREFIX-blocks-info ${workdir}/${PREFIXOUT}0-noartifact-merged-links ${workdir}/${PREFIXOUT}0-block-table ${workdir}/${PREFIXOUT}0-block-pileup ${workdir}/${PREFIXOUT}0-blocks-info ${workdir}/${PREFIXOUT}0-block-links ${workdir}/${PREFIXOUT}0-block2block ${workdir}/$PREFIX-noartifact-all-blocks2keep 1 >> ${logname}	
+	gem-aaa_merge-links ${workdir}/${PREFIXOUT}0-block-links ${workdir}/${PREFIXOUT}0-links  ${anchorchunk} >> ${logname}
+	if [ $2 = 1 ]; then
+            gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-anchor2block ${workdir}/${PREFIXOUT}0-blocks-info ${workdir}/${PREFIXOUT}0-block-table ${workdir}/${PREFIXOUT}0-block-pileup ${workdir}/${PREFIXOUT}0-block2block ${workdir}/${PREFIXOUT}0-table ${workdir}/${PREFIXOUT}0-pileup ${workdir}/${PREFIXOUT}0-anchor2block >> ${logname}
+	else
+            gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/${PREFIXOUT}0-blocks-info ${workdir}/${PREFIXOUT}0-block-table ${workdir}/${PREFIXOUT}0-block-pileup ${workdir}/${PREFIXOUT}0-table ${workdir}/${PREFIXOUT}0-pileup  >> ${logname}
+	fi
+	gem-aaa_clean-graph ${workdir}/${PREFIXOUT}0-blocks-info ${workdir}/${PREFIXOUT}0-links ${workdir}/${PREFIXOUT}-expanded-links ${workdir}/${PREFIXOUT}0-blocks2keep 1 $3  ${coverage} ${scaffolds_as_input|arg("1")|else("0")} ${max_distance_diff_perc} ${anchor} ${trim} >> ${logname}
+	gem-aaa_block1-graph-1-1 ${workdir}/${PREFIXOUT}0-blocks-info ${workdir}/${PREFIXOUT}-expanded-links ${workdir}/${PREFIXOUT}-block-table ${workdir}/${PREFIXOUT}-block-pileup ${workdir}/${PREFIXOUT}-blocks-info ${workdir}/${PREFIXOUT}-block-links ${workdir}/${PREFIXOUT}-block2block ${workdir}/${PREFIXOUT}0-blocks2keep 1 >> ${logname}	
+	gem-aaa_merge-links ${workdir}/${PREFIXOUT}-block-links ${workdir}/${PREFIXOUT}-links  ${anchorchunk} >> ${logname}
+	if [ $2 = 1 ]; then
+	    gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/${PREFIXOUT}0-blocks-info ${workdir}/${PREFIXOUT}0-table ${workdir}/${PREFIXOUT}0-pileup ${workdir}/${PREFIXOUT}0-anchor2block ${workdir}/${PREFIXOUT}-blocks-info ${workdir}/${PREFIXOUT}-block-table ${workdir}/${PREFIXOUT}-block-pileup ${workdir}/${PREFIXOUT}-block2block ${workdir}/${PREFIXOUT}-table ${workdir}/${PREFIXOUT}-pileup ${workdir}/${PREFIXOUT}-anchor2block >> ${logname}
+		last_op=$?
+	else
+	    gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/${PREFIXOUT}0-blocks-info ${workdir}/${PREFIXOUT}0-table ${workdir}/${PREFIXOUT}0-pileup  ${workdir}/${PREFIXOUT}-blocks-info ${workdir}/${PREFIXOUT}-block-table ${workdir}/${PREFIXOUT}-block-pileup ${workdir}/${PREFIXOUT}-table ${workdir}/${PREFIXOUT}-pileup  >> ${logname}
+		last_op=$?
+	fi
+	if [ $last_op -eq 0 ];  then 
+		rm ${workdir}/${PREFIXOUT}0-*
+		rm ${workdir}/${PREFIX}-blocks2keep 
+		rm ${workdir}/${PREFIX}-noartifact-*
+		rm ${workdir}/${PREFIXOUT}0-noartifact-*
+		rm ${workdir}/${PREFIXOUT}0-expanded-links
+		rm ${workdir}/${PREFIXOUT}-block-*
+		rm ${workdir}/${PREFIXOUT}-block2block 
+	fi
+}
+
+function clean_graph {
+    clean_graph_all $1 "1" $2
+}
+
+function basic_demux {
+	gem-aaa_demux ${alignments_orig} ${workdir}/distances.anchors ${workdir}/components.anchors ${workdir}/alignments.sorted ${workdir}/components ${workdir}/base-anchor-links >> ${logname}
+    compact_graph "base" ""
+    #clean_graph "base"
+}
+
+function filtered_demux {	
+	let ANCHORPLUSINDEL=${anchor}+${max_distance_diff_perc}
+	BASE=base
+	gem-aaa_create-filtered-anchors  ${reads} ${alignments_orig}  ${workdir}/$BASE-anchor2block ${workdir}/$BASE-blocks-info ${workdir}/$BASE-links ${workdir}/anchors-mask ${max_distance_diff_perc} ${hub_cardinality} ${coverage} 
+	gem-aaa_filtered-demux ${workdir}/anchors-mask ${workdir}/distances.anchors ${workdir}/components.anchors ${workdir}/alignments.sorted ${workdir}/components ${workdir}/filtered-anchor-links >> ${logname}
+	if [ $? -eq 0 ];  then 
+		rm ${workdir}/distances.anchors 
+		rm ${workdir}/components.anchors
+		rm ${workdir}/alignments.sorted 
+	fi
+	compact_graph "filtered" ${workdir}/anchors-mask
+	clean_graph "filtered" ""
+
+}
+
+
+function demux {
+ basic_demux
+ filtered_demux
+#  clean_graph "filtered"
+}
+
+
+
+function rough_scaffold {
+    PREFIX=$1
+	gem-aaa_merge-links ${workdir}/$PREFIX-links ${workdir}/$PREFIX-pair-links ${workdir}/$PREFIX-expanded-with-pairs-links ${workdir}/$PREFIX-libraries-deviation ${coverage} ${anchor} ${anchorchunk}
+	gem-aaa_block1-graph-1-1 ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-expanded-with-pairs-links ${workdir}/$PREFIX-with-pairs-block-table ${workdir}/$PREFIX-with-pairs-block-pileup ${workdir}/$PREFIX-with-pairs-blocks-info ${workdir}/$PREFIX-with-pairs-block-links ${workdir}/$PREFIX-with-pairs-block2block $2 1 >> ${logname}	
+	gem-aaa_merge-links ${workdir}/$PREFIX-with-pairs-block-links ${workdir}/$PREFIX-with-pairs-links ${anchorchunk} >> ${logname}
+	gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-anchor2block ${workdir}/$PREFIX-with-pairs-blocks-info ${workdir}/$PREFIX-with-pairs-block-table ${workdir}/$PREFIX-with-pairs-block-pileup ${workdir}/$PREFIX-with-pairs-block2block ${workdir}/$PREFIX-with-pairs-table ${workdir}/$PREFIX-with-pairs-pileup ${workdir}/$PREFIX-with-pairs-anchor2block >> ${logname}
+	#clean bubbles and block
+	clean_graph $PREFIX-with-pairs ""
+	cp ${workdir}/*-repeats-anchors ${workdir}/$PREFIX-nobubble-repeats-anchors
+	if [ $? -eq 0 ];  then 
+		rm ${workdir}/$PREFIX-expanded-with-pairs-links
+		rm ${workdir}/$PREFIX-with-pairs-block-*
+		rm ${workdir}/$PREFIX-with-pairs-block2block
+	fi
+}
+
+function pair_links_from_scaffolds {
+    PREFIX=$1
+    gem-aaa_agp2pairs ${workdir}/scaffolds.agp ${workdir}/pair-read-links ${min_anchor}
+   
+    gem-aaa_add-pair-links ${reads} ${alignments_orig} ${workdir}/anchors-mask ${workdir}/pair-read-links ${workdir}/$PREFIX-blocks-info   ${workdir}/$PREFIX-links ${workdir}/$PREFIX-anchor2block ${workdir}/$PREFIX-pair-translated-links ${workdir}/$PREFIX-read-pair-translated-links ${workdir}/$PREFIX-libraries-counts  ${anchor} 1 1
+    gem-aaa_merge-links ${workdir}/$PREFIX-pair-translated-links ${workdir}/$PREFIX-pair-links ${anchorchunk}
+    if [ $? -eq 0 ];  then
+    	rm ${workdir}/pair-read-links 
+    fi
+}
+
+function add_pair_links_from_scaffolds {
+    PREFIX=$1
+    #add pairs                                                                                      
+    pair_links_from_scaffolds $PREFIX 
+	rough_scaffold $PREFIX ""
+}
+
+function pair_links_from_libraries {
+    PREFIX=$1
+    gem-aaa_add-pair-links ${reads}  ${alignments_orig} ${workdir}/anchors-mask ${workdir}/libraries ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-links ${workdir}/$PREFIX-anchor2block ${workdir}/$PREFIX-pair-translated-links ${workdir}/$PREFIX-read-pair-translated-links ${workdir}/$PREFIX-libraries-counts  ${anchor} 1 0
+    gem-aaa_merge-links ${workdir}/$PREFIX-pair-translated-links ${workdir}/$PREFIX-pair-links ${anchorchunk}
+}
+  
+
+function add_pair_links_from_libraries {
+    PREFIX=$1
+    pair_links_from_libraries $PREFIX
+    rough_scaffold $PREFIX ""
+}
+
+
+function repeat_resolution {
+  PREFIX=$1
+  if [ $2 -eq 0 ]; then
+    pair_links_from_libraries $PREFIX
+  else
+    pair_links_from_scaffolds $PREFIX
+  fi
+  do_path_expansion=1
+  if [ ${path_expansion_depth} -eq 0 ]; then
+  	do_path_expansion=0
+  fi
+  echo ${do_path_expansion}
+  gem-aaa_links-standard-deviation ${workdir}/$PREFIX-pair-translated-links ${workdir}/$PREFIX-pair-links ${workdir}/$PREFIX-libraries-deviation
+  gem-aaa_read-repeat-resolution ${reads} ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-links ${workdir}/$PREFIX-pair-links ${workdir}/$PREFIX-read-pair-translated-links ${workdir}/$PREFIX-blocks-info ${alignments_orig}  ${workdir}/$PREFIX-unfolded-block-table ${workdir}/$PREFIX-unfolded-block-pileup ${workdir}/$PREFIX-unfolded-links ${workdir}/$PREFIX-unfolded-blocks-info ${workdir}/$PREFIX-unfolded-block2block  ${workdir}/$PREFIX-libraries-deviation ${max_distance_diff_perc} ${coverage} ${coverage} ${min_out_scaffold} ${repeat_resolution_depth} ${path_expansion_depth} ${do_path_expansion} >> ${logname}
+  gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-anchor2block ${workdir}/$PREFIX-unfolded-blocks-info ${workdir}/$PREFIX-unfolded-block-table ${workdir}/$PREFIX-unfolded-block-pileup ${workdir}/$PREFIX-unfolded-block2block ${workdir}/$PREFIX-unfolded-table ${workdir}/$PREFIX-unfolded-pileup ${workdir}/$PREFIX-unfolded-anchor2block ${workdir}/$PREFIX-norepeats-repeats-anchors  >> ${logname}
+  gem-aaa_merge-links ${workdir}/$PREFIX-unfolded-links ${workdir}/$PREFIX-unfolded-merged-links ${anchorchunk} >> ${logname}
+  gem-aaa_block1-graph-1-1 ${workdir}/$PREFIX-unfolded-blocks-info ${workdir}/$PREFIX-unfolded-merged-links ${workdir}/$PREFIX-norepeats-block-table ${workdir}/$PREFIX-norepeats-block-pileup ${workdir}/$PREFIX-norepeats-blocks-info ${workdir}/$PREFIX-norepeats-block-links ${workdir}/$PREFIX-norepeats-block2block 1 >> ${logname}	
+  gem-aaa_merge-links ${workdir}/$PREFIX-norepeats-block-links ${workdir}/$PREFIX-norepeats-lib-links ${anchorchunk} >> ${logname}
+  gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/$PREFIX-unfolded-blocks-info ${workdir}/$PREFIX-unfolded-table ${workdir}/$PREFIX-unfolded-pileup ${workdir}/$PREFIX-unfolded-anchor2block ${workdir}/$PREFIX-norepeats-blocks-info ${workdir}/$PREFIX-norepeats-block-table ${workdir}/$PREFIX-norepeats-block-pileup ${workdir}/$PREFIX-norepeats-block2block ${workdir}/$PREFIX-norepeats-table ${workdir}/$PREFIX-norepeats-pileup ${workdir}/$PREFIX-norepeats-anchor2block >> ${logname}
+  cp ${workdir}/$PREFIX-libraries-deviation ${workdir}/$PREFIX-norepeats-nobubble-libraries-deviation
+  cp ${workdir}/$PREFIX-norepeats-repeats-anchors ${workdir}/$PREFIX-norepeats-nobubble-repeats-anchors
+  gem-aaa_compact-library-links ${workdir}/$PREFIX-norepeats-nobubble-libraries-deviation ${workdir}/$PREFIX-norepeats-lib-links   ${workdir}/$PREFIX-norepeats-links ${coverage}
+   if [ $? -eq 0 ];  then
+  	rm ${workdir}/$PREFIX-unfolded-*
+  	rm ${workdir}/$PREFIX-norepeats-block-*
+  	rm ${workdir}/$PREFIX-norepeats-block2block
+  	rm ${workdir}/$PREFIX-norepeats-lib-links 
+  fi
+  clean_graph $PREFIX-norepeats ${workdir}/$PREFIX-libraries-deviation
+}
+
+function remove_library_links {
+  PREFIX=$1
+  cp $PREFIX-links $PREFIX-all-links
+  gem-aaa_clean-library-links $PREFIX-all-links $PREFIX-links
+  clean_graph $PREFIX ""
+}
+
+function solve {
+  PREFIX=$1
+
+  if [ $2 -eq 0 ]; then
+    pair_links_from_libraries $PREFIX
+  else
+    pair_links_from_scaffolds $PREFIX
+  fi
+
+  gem-aaa_select-branch-greedy ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-links ${workdir}/$PREFIX-libraries-counts  ${workdir}/$PREFIX-chosen-links ${path_selection_ratio} >> ${logname}
+  gem-aaa_block1-graph-1-1 ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-chosen-links ${workdir}/$PREFIX-solved-block-table ${workdir}/$PREFIX-solved-block-pileup ${workdir}/$PREFIX-solved-blocks-info ${workdir}/$PREFIX-solved-block-links ${workdir}/$PREFIX-solved-block2block 1 >> ${logname}	
+  gem-aaa_merge-links ${workdir}/$PREFIX-solved-block-links ${workdir}/$PREFIX-solved-links ${anchorchunk} >> ${logname}
+  gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-anchor2block ${workdir}/$PREFIX-solved-blocks-info ${workdir}/$PREFIX-solved-block-table ${workdir}/$PREFIX-solved-block-pileup ${workdir}/$PREFIX-solved-block2block ${workdir}/$PREFIX-solved-table ${workdir}/$PREFIX-solved-pileup ${workdir}/$PREFIX-solved-anchor2block >> ${logname}
+  cp ${workdir}/$PREFIX-repeats-anchors ${workdir}/$PREFIX-solved-repeats-anchors
+ # clean_graph $PREFIX-solved ${workdir}/$PREFIX-libraries-deviation
+  if [ $? -eq 0 ];  then
+  	rm ${workdir}/$PREFIX-chosen-links
+  	rm ${workdir}/$PREFIX-solved-block-*
+  	rm ${workdir}/$PREFIX-solved-block2block
+  fi
+}
+
+function cutblocks {
+    let MINTERMINAL=${min_out_scaffold} 
+	PREFIX=$1
+	REPEATSFILE=$2   
+	gem-aaa_blocks-by-position ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-links ${workdir}/$PREFIX-overlapping-ends-offsets ${workdir}/$PREFIX-non-overlapping-lengths  ${workdir}/$PREFIX-classes-links ${workdir}/$PREFIX-positions2classes >> ${logname}
+	gem-aaa_merge-links ${workdir}/$PREFIX-classes-links ${workdir}/$PREFIX-expanded-merged-classes-links ${anchorchunk}	>> ${logname}
+#       gem-aaa_basic-cut ${workdir}/$PREFIX-expanded-merged-classes-links  ${workdir}/$PREFIX-simplified-merged-classes-links
+	mv ${workdir}/$PREFIX-expanded-merged-classes-links ${workdir}/$PREFIX-simplified-merged-classes-links
+	gem-aaa_block1-graph-1-1 ${workdir}/$PREFIX-non-overlapping-lengths  ${workdir}/$PREFIX-simplified-merged-classes-links  ${workdir}/$PREFIX-classes-table ${workdir}/$PREFIX-classes-pileup ${workdir}/$PREFIX-non-overlapping-blocks-info ${workdir}/$PREFIX-non-overlapping-block-links ${workdir}/$PREFIX-classes2blocks 2  >> ${logname}
+	gem-aaa_merge-links ${workdir}/$PREFIX-non-overlapping-block-links ${workdir}/$PREFIX-non-overlapping-links ${anchorchunk}	>> ${logname}
+	gem-aaa_non-overlapping-blocks ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-overlapping-ends-offsets ${workdir}/$PREFIX-non-overlapping-lengths ${workdir}/$PREFIX-positions2classes ${workdir}/$PREFIX-non-overlapping-links ${workdir}/$PREFIX-classes2blocks  ${workdir}/$PREFIX-non-overlapping-block-table  ${workdir}/$PREFIX-non-overlapping-block-pileup >> ${logname}
+#	gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-non-overlapping-blocks-info ${workdir}/$PREFIX-non-overlapping-block-table ${workdir}/$PREFIX-non-overlapping-block-pileup ${workdir}/$PREFIX-non-overlapping-table ${workdir}/$PREFIX-non-overlapping-pileup >> ${logname}
+	gem-aaa_block2anchor-pileup ${alignments_orig} ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-anchor2block ${workdir}/$PREFIX-non-overlapping-blocks-info ${workdir}/$PREFIX-non-overlapping-block-table ${workdir}/$PREFIX-non-overlapping-block-pileup  ${workdir}/$PREFIX-classes2blocks ${workdir}/$PREFIX-non-overlapping-table ${workdir}/$PREFIX-non-overlapping-pileup ${workdir}/$PREFIX-non-overlapping-anchor2block >> ${logname}
+	#gem-aaa_blocks2fasta ${reads} ${alignments_orig} ${workdir}/$PREFIX-non-overlapping-table ${workdir}/$PREFIX-non-overlapping-pileup ${workdir}/$PREFIX-non-overlapping-blocks-info ${workdir}/$PREFIX-sequence-by-block.fasta ${workdir}/$PREFIX-coverage-by-block.fasta ${workdir}/$PREFIX-reads-by-block ${min_out_scaffold} >> ${logname}
+#	clean_graph_all $PREFIX"-non-overlapping" 0
+#	PREFIX=$PREFIX"-non-overlapping-nobubble" 
+	if [ $? -eq 0 ];  then
+  		rm ${workdir}/$PREFIX-overlapping-*
+  		rm ${workdir}/$PREFIX-expanded-*
+  		rm ${workdir}/$PREFIX-classes*
+  		rm ${workdir}/$PREFIX-simplified-*
+  		rm ${workdir}/$PREFIX-positions2classes
+  		rm ${workdir}/$PREFIX-non-overlapping-block-*
+  	fi
+	PREFIX=$PREFIX"-non-overlapping"
+	CONTEXT=$((${anchor}/100 + 5))
+	gem-aaa_blocks2fasta ${reads} ${alignments_orig} ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-blocks-info ${output_chunks} ${workdir}/$PREFIX-sequence-by-block.fasta ${workdir}/$PREFIX-coverage-by-block.fasta ${workdir}/$PREFIX-reads-by-block $REPEATSFILE ${min_out_scaffold} $CONTEXT $MINTERMINAL ${consensus_type}  >> ${logname}
+	 if [ $? -eq 0 ];  then
+	 	rm ${workdir}/$PREFIX-lengths
+  	fi
+}
+
+function blocks2fasta {
+    PREFIX=$1
+    REPEATSFILE=$2
+    MINTERMINAL=${min_out_scaffold}
+    let CONTEXT=${anchor}/100 + 5
+    gem-aaa_blocks2fasta ${reads} ${alignments_orig} ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-blocks-info ${output_chunks} ${workdir}/$PREFIX-sequence-by-block.fasta ${workdir}/$PREFIX-coverage-by-block.fasta ${workdir}/$PREFIX-reads-by-block $REPEATSFILE ${min_out_scaffold} $CONTEXT $MINTERMINAL ${consensus_type} >> ${logname}
+}
+
+function terminals {
+  PREFIX=$1
+  let region=${anchor} - 1;
+  let newanchor=${anchor}/2;
+  gem-aaa_terminal-reads2fasta ${reads} ${alignments_orig} ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-blocks-info ${workdir}/terminal-anchors.fasta ${workdir}/terminal-reads $region $newanchor >> ${logname}	
+  if [ $? -eq 0 ];  then
+  	rm alignments.sorted
+  fi
+}
+
+function explorer {
+  PREFIX=$1
+  gem-aaa_explorer1 ${reads} ${alignments_orig} ${workdir}/$PREFIX-table ${workdir}/$PREFIX-pileup ${workdir}/$PREFIX-blocks-info ${workdir}/$PREFIX-links
+}
+
+# ${prefix} can be base or filtered
+function core {
+# enrich_anchor
+ pileup 
+ predemux
+ demux
+# cutblocks ${prefix}"-nobubble"
+ repeat_resolution ${prefix}"-nobubble" ${scaffolds_as_input|arg("1")|else("0")}
+ cutblocks ${prefix}"-nobubble-norepeats-nobubble" ${prefix}"-nobubble-norepeats-nobubble-repeats-anchors"
+}
+
+function scaffold {
+   if  [ $2 -eq 0 ]; then
+    add_pair_links_from_libraries  $1
+  else
+    add_pair_links_from_scaffolds $1
+  fi
+}
+
+
+function core_tips {
+ basic_demux
+ remove_pure_tips "base"
+ if [ $last_op -eq 0 ];  then 
+ 	rm ${workdir}/alignments.sorted
+ 	rm ${workdir}/distances.anchors 
+	rm ${workdir}/components.anchors
+ fi
+}
+
+
+
+
+#num_params=$#              # Number of command-line parameters.
+
+#Apply results
+rm -rf ${logname}
+
+if [[ -z ${module} ]]; then 
+		core
+else
+  if [ ${module} = "pileup" ]; then
+	pileup
+	predemux
+  elif  [ ${module} = "simplified-graph" ]; then
+	demux 
+  elif  [ ${module} = "cutblocks" ]; then
+	cutblocks ${prefix} ""
+  elif  [ ${module} = "cutblocks-repeats" ]; then
+#      blocks2fasta ${prefix} ${prefix}-repeats-anchors
+       cutblocks ${prefix} ${prefix}-repeats-anchors
+  elif  [ ${module} = "blocks2fasta" ]; then
+      blocks2fasta ${prefix} ""
+  elif  [ ${module} = "blocks2fasta-repeats" ]; then
+      blocks2fasta ${prefix} ${prefix}-repeats-anchors  
+  elif  [ ${module} = "explorer" ]; then
+	explorer  ${prefix}
+  elif  [ ${module} = "terminals" ]; then
+	terminals  ${prefix}
+  elif  [ ${module} = "repeats" ]; then
+	repeat_resolution ${prefix} ${scaffolds_as_input|arg("1")|else("0")}
+  elif [ ${module} = "notips-graph" ]; then
+        core_tips  
+  elif [ ${module} = "core-pipeline" ]; then
+        core 
+  elif [ ${module} = "remove-tips" ]; then
+        remove_pure_tips ${prefix}
+  elif [ ${module} = "scaffold" ]; then
+      scaffold ${prefix} ${scaffolds_as_input|arg("1")|else("0")}
+  elif [ ${module} = "clean" ]; then
+      clean_graph ${prefix} "" 
+  elif [ ${module} = "clean-repeats" ]; then
+      clean_graph ${prefix}-norepeats ${prefix}-libraries-deviation
+  elif [ ${module} = "solve" ]; then
+      solve ${prefix}
+  elif [ ${module} = "remove-paired-links" ]; then
+      remove_library_links ${prefix}
+  elif [ ${module} = "stats"]; then
+ 	  stats ${prefix}
+  else
+  	echo "invalid option"
+    exit 1
+  fi
+fi

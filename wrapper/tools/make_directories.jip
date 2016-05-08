@@ -1,0 +1,44 @@
+#! jip
+# Usage:
+#   make_directories -a <anchor-values>... --asm-dir <asm-dir>
+#
+# Inputs:
+#   --asm-dir <asm-dir>                  assembly directory
+#
+# Options:
+#   -a <anchor-values>...                      anchor sizes
+
+#%begin init
+add_output('anchors')
+
+#%end 
+
+#%begin setup
+
+anchor_dirs = []
+
+anchor_iter = iter(r(a))
+cur_anchor = next(anchor_iter, None)
+acc_path=asm_dir 
+next_anchor = next(anchor_iter,None)
+while next_anchor != None:
+  acc_path = acc_path +  "/" + "anchor-" + next_anchor 
+  anchor_dirs.append(acc_path)
+  next_anchor = next(anchor_iter,None)
+
+options['anchors'].set(anchor_dirs)
+
+#%end
+
+#%command
+for i in ${anchors}; do
+  mkdir $i
+  cd $i
+  ln -s ${asm_dir}/reads 
+  ln -s ${asm_dir}/libraries
+  if [ -f  ${asm_dir}/scaffolds.agp ]; then
+    ln -s ${asm_dir}/scaffolds.agp
+  fi
+done
+
+ 

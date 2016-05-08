@@ -1,0 +1,380 @@
+#! jip
+#
+# Usage:
+#    anchor_assembly_pipeline.jip -c <cfg>
+# Inputs:
+#     -c, --cfg <cfg>    Configuration json file 
+#
+# Author: Leonor Frias Moya, CNAG
+#
+
+#%begin init
+
+add_input('index')
+add_input('anchor')
+add_input('anchor_directories')
+add_input('reads')
+add_output('contigs')
+#%end
+
+#%begin setup
+# Check existance of files before running the pipeline by adding them as inputs
+import os
+def parser_json_file(jsonFile):
+    import json
+    with open(jsonFile) as json_file:
+        dictionary = json.load(json_file)
+    
+    return dictionary
+
+jsonConfig = r("${cfg}")
+
+cfg_dict = parser_json_file(jsonConfig)
+
+output_directory = cfg_dict["input"]["asmDirectory"]
+if output_directory == ".":
+    output_directory = ""
+else:
+    output_directory += "/"
+index_chunks = int(cfg_dict["mappingParameters"]["indexChunks"])
+mapping_chunks = int(cfg_dict["mappingParameters"]["mappingChunks"])
+
+options['reads'].set(output_directory+"reads")
+options['anchor'].set([output_directory+"anchors-%s" % i for i in range(mapping_chunks)])
+options['index'].set([output_directory+"index-%s" % i for i in range(index_chunks)])
+
+options['contigs'].set("contigs.fa")
+
+anchor_dirs = []
+anchors = cfg_dict["mainParameters"]["anchors"] 
+acc_path=output_directory  
+#Put to itself
+anchor_dirs.append(acc_path)
+for next_anchor in anchors[1:]:
+  acc_path = acc_path + "anchor-" + str(next_anchor) + "/"
+  anchor_dirs.append(acc_path)
+options['anchor_directories'].set(anchor_dirs)
+
+#%end
+
+
+#%begin pipeline
+import os
+import os.path
+import sys
+
+def parser_json_file(jsonFile):
+    import json
+    with open(jsonFile) as json_file:
+        dictionary = json.load(json_file)
+    
+    return dictionary
+
+# Load json
+jsonConfig = r("${cfg}")
+
+cfg_dict = parser_json_file(jsonConfig)
+
+# Debug mode
+debug = cfg_dict["json"]["debugMode"]
+
+# Path parameters
+output_directory = cfg_dict["input"]["asmDirectory"]
+
+# General parameters
+scaffolds_as_input =cfg_dict["mainParameters"]["scaffoldsAsInput"]
+anchor_sizes = cfg_dict["mainParameters"]["anchors"] 
+max_anchor = anchor_sizes[0]
+use_small_reads = cfg_dict["mainParameters"]["useSmallReads"] # Takes correctly the boolean value
+memory= cfg_dict["mainParameters"]["memory"]
+coverage= cfg_dict["mainParameters"]["coverage"]
+use_small_reads=cfg_dict["mainParameters"]["useSmallReads"]
+
+# Mapping parameters
+extra = cfg_dict["mappingParameters"]["extraMappingParameters"]
+m = cfg_dict["mappingParameters"]["divergence"] 
+e = float(m)*2
+s = float(m)*anchor_sizes[0]
+d = cfg_dict["mappingParameters"]["maxMapsXAnchor"] 
+min_maps_x_anchor = cfg_dict["mappingParameters"]["minMapsXAnchor"] # TODO: should be used somewhere..
+
+# Graph parameters
+max_distance_diff = cfg_dict["graphParameters"]["maxDistanceDiff"]
+trim = cfg_dict["graphParameters"]["trim"]
+hub_cardinality = cfg_dict["graphParameters"]["hubCardinality"]
+repeat_rounds = cfg_dict["graphParameters"]["repeatRounds"] 
+repeat_resolution_depth =  cfg_dict["graphParameters"]["repeatResolutionDepth"] 
+path_expansion_depth = cfg_dict["graphParameters"]["pathExpansionDepth"]
+path_selection_ratio = cfg_dict["graphParameters"]["pathSelectionRatio"]
+
+# Output parameters        
+raw_graph_output=cfg_dict["outputParameters"]["rawGraphOutput"]
+output_chunks=cfg_dict["outputParameters"]["outputChunks"]
+min_out_scaffold= cfg_dict["outputParameters"]["minOutScaffold"] 
+consensus_type = cfg_dict["outputParameters"]["consensusType"]
+
+num_directories = len(anchor_directories)
+
+# Index
+index_jobs = []
+index_chunks = int(cfg_dict["mappingParameters"]["indexChunks"])
+min_index_chunks = int(cfg_dict["mappingParameters"]["minIndexChunks"])
+
+# In case there are lot of indexes, reduce them
+selected_index = None
+if (min_index_chunks < index_chunks): 
+    index_to_be_selected = job(dir=output_directory).run('cat-and-split', prefix_input="index", chunks_input=index_chunks,  chunks_output=min_index_chunks, prefix_output="to-be-selected-index")
+    if not debug:
+        clean_index_to_be_selected = job("clean_index_to_be_selected", dir=output_directory).bash('''
+            let m=${chunks}-1; for i in $(seq 0 $m); do rm ${pattern}-$i; done
+            ''',
+                _options = {"chunks": index_to_be_selected.chunks_input, "pattern": index_to_be_selected.prefix_input})
+        index_to_be_selected - clean_index_to_be_selected
+    selected_tmp_index = job('selected_index', dir=output_directory).run("select-reads",
+        chunks = index_to_be_selected.chunks_output, prefix_input = index_to_be_selected.prefix_output, prefix_output = "selected-tmp", e=str(e), m=m, anchors = anchor_sizes, use_small_reads= use_small_reads)
+    index_to_be_selected >> selected_tmp_index 
+    selected_index = job(dir=output_directory).run('cat-and-split', prefix_input=selected_tmp_index.prefix_output, chunks_input= selected_tmp_index.chunks, chunks_output=index_chunks, prefix_output="selected-index")
+    if not debug:
+        clean_selected_index = job("clean_selected_index",dir=output_directory).bash('let m=${chunks}-1; for i in $(seq 0 $m); do rm ${pattern}-$i; done',
+            _options = {"chunks": selected_index.chunks_input, "pattern": selected_index.prefix_input})
+        selected_index - clean_selected_index
+    selected_tmp_index >> selected_index
+else:
+    selected_index = job('selected_index', dir=output_directory).run("select-reads",
+    chunks = index_chunks, prefix_input = "index", prefix_output="selected-index", e=str(e), m=m, anchors=anchor_sizes, use_small_reads=use_small_reads)
+    if not debug:
+        clean_selected_index = job("clean_selected_index",dir=output_directory).bash('let m=${chunks}-1; for i in $(seq 0 $m); do rm ${pattern}-$i; done',
+            _options = {"chunks": selected_index.chunks, "pattern": selected_index.prefix_input})
+        selected_index - clean_selected_index
+
+     
+for index_i in index:
+    index_job = job("make_"+ os.path.basename(index_i), dir=output_directory).bash('''
+               gem-indexer -i ${to_index} -T  $JIP_THREADS -o ${outfile|ext}
+               ''', 
+               _options={'this_index': index_i, 'to_index':"${this_index|parent}/selected-${this_index|name}"},
+               _outputs={'log': "${to_index}.log"},
+               outfile = "${to_index}.gem")
+    if not debug:
+        clean_index_job = job("clean_index_"+ os.path.basename(index_i),dir=output_directory).bash('rm ${to_index} ${log}',
+            _options = {"to_index":index_job.to_index, "log": index_job.log})
+        index_job - clean_index_job
+    selected_index >> index_job
+    index_jobs.append(index_job)          
+
+
+anchor_iter = iter(anchor_sizes)
+terminal_anchor_job = None
+cur_anchor = anchor_iter.next();
+alignments_job = None
+prev_dir = None
+previous_cat = None
+partial_cleanup = None
+for level_dir, cur_dir in enumerate(anchor_directories):
+    list_anchor = []
+    # In the first iteration,  the original set of anchors is mapped, otherwise just the computed terminal ones
+    if level_dir == 0:
+        for anchor_i in anchor:
+            list_anchor.append(anchor_i)
+    else:
+        list_anchor.append("terminal_"+str(cur_anchor))
+    collect_jobs = []
+    for count_anchor, anchor_i in enumerate(list_anchor):
+         map_jobs_anchor_i = []
+         anchor_job_to_clean = None
+         anchor_name_ending = str(cur_anchor) + "_anchor-" + str(count_anchor)
+         for count_index,index_job in enumerate(index_jobs):   
+             this_name_ending =  anchor_name_ending+ "_index-" + str(count_index)
+             output_mapping = "map-"+str(count_anchor)+"-"+str(count_index)+".map"
+             anchor_job = None
+             if level_dir == 0:
+                anchor_job = job("map_anchor_chunk_"+ this_name_ending, dir=cur_dir).run('map-anchor-chunk',
+                 index = index_job, anchors= anchor_i, e=e, m=m, s=s, D="0", d=d, extra=extra,
+                 output = output_mapping)
+                anchor_job_to_clean = anchor_job
+             else: 
+                fake_parameters_job = job("fake_parameters_" + this_name_ending, dir=cur_dir).bash('''
+                    fake_parameters ${parameters} ${terminal_anchors}
+                    ''',
+                    _inputs={'terminal_anchors':terminal_anchor_job.terminal_anchors},
+                    _options={'parameters':prev_dir+"/parameters"},
+                    output="parameters")
+                anchor_job_tmp = job('map_anchor_chunk_' + this_name_ending, dir=cur_dir).run('map-anchor-chunk',
+                 index = index_job, anchors=terminal_anchor_job.terminal_anchors, e=e, m=m, s=s, D="0", d=d, extra=extra)
+                fake_parameters_job >> anchor_job_tmp
+                anchor_job = job("filter_anchors_anchor_" + this_name_ending , dir=cur_dir).bash('''
+                    sed 's/\t\t/\t/' | gem-aaa_filter-with-read-table ${terminal_reads} ${m} ${m} ${m} ${m} $JIP_THREADS
+                    ''', 
+                    input = anchor_job_tmp,
+                    _inputs = {'terminal_reads': terminal_anchor_job.terminal_reads},
+                    _options = {'m':m},
+                    output= output_mapping)
+                anchor_job_tmp | anchor_job 
+                anchor_job_to_clean = anchor_job_tmp
+             map_jobs_anchor_i.append(anchor_job)
+             if not debug:
+                clean_anchor_job = job("clean_anchor_"+ anchor_name_ending, dir=cur_dir).bash('rm ${input}', input=anchor_job_to_clean.anchors)
+         collect_job = job("collect_"+ anchor_name_ending, dir=cur_dir).bash('''
+             touch done-mapping; gem-aaa_collect -c ${anchor_chunk} -i . -T $JIP_THREADS
+             ''',                                          
+             _options={'anchor_chunk': count_anchor},
+             _outputs={'payload': "alignments-${anchor_chunk}-payload", 'table': "alignments-${anchor_chunk}-table"})
+         collect_jobs.append(collect_job)
+         for map_job_anchor_i in map_jobs_anchor_i:  
+             map_job_anchor_i >> collect_job
+             # TEST to avoid cascading
+             #collect_job = map_job_anchor_i
+                         
+                 
+    
+    # If not first iteration, the alignments file has to be refined
+    collect_general = None
+    if level_dir > 0 : 
+        collect_general = job("collect_general_"+ str(cur_anchor),dir=cur_dir).bash('''
+         touch done-collecting-chunks; gem-aaa_collect -t -i .; mv ${tmp_alignments} ${outfile}
+         ''',
+         _options = {'tmp_alignments': "alignments.orig"},
+         outfile = "alignments.orig.new")
+        alignments_job = job("alignments_refinement_"+ str(cur_anchor), dir = cur_dir).bash('''
+            gem-aaa_align-modify ${input} ${prev_alignments} ${terminal_reads} ${outfile} ${cur_anchor} ${e}
+            ''',
+            input = collect_general,
+            _inputs = {'prev_alignments': alignments_job, 'terminal_reads': terminal_anchor_job.terminal_reads},
+            _options = {'e': e, 'cur_anchor': cur_anchor},
+            outfile = "alignments.orig"
+        )
+    else:
+         alignments_job = job("collect_general_"+ str(cur_anchor), dir=cur_dir).bash('''
+         touch done-collecting-chunks; gem-aaa_collect -t -i .
+         ''',
+         outfile = "alignments.orig")
+         collect_general = alignments_job
+
+    prev_job = collect_general                
+    for collect_i, collect_job in enumerate(collect_jobs):
+         collect_job >> collect_general
+         # TEST to avoid cascading
+         #collect_general=collect_job
+         if not debug:
+            clean_alignments_job = job("clean_align_table_"+ str(cur_anchor) + "_anchor-" + str(collect_i), dir=cur_dir).bash('rm ${table} ${payload}',
+            _inputs = {'table':collect_job.table, 'payload':collect_job.payload})
+            prev_job - clean_alignments_job 
+            prev_job = clean_alignments_job
+
+
+    
+    #If not last iteration, do pipeline for tips and compute terminal anchors
+    #otherwise, do whole pipeline
+    assembly_job=None
+    if level_dir < (num_directories - 1):
+        prev_anchor = cur_anchor
+        prev_anchor_dec = cur_anchor - 1
+        cur_anchor = anchor_iter.next(); # Advance current iterator
+        # TODO do pipeline tips
+        prefix_output ="base-notips"
+
+        assembly_pileup = job("assembly_pileup_"+ str(prev_anchor), dir=cur_dir).run('asm-core', module="pileup", logname="pileup.log",
+            workdir=cur_dir, reads=reads, alignments_orig= alignments_job, anchor=max_anchor, min_anchor=prev_anchor, 
+            scaffolds_as_input=scaffolds_as_input, trim=trim, hub_cardinality=hub_cardinality, max_distance_diff=max_distance_diff, coverage=coverage,
+            repeat_resolution_depth=repeat_resolution_depth, path_expansion_depth=path_expansion_depth,
+            path_selection_ratio=path_selection_ratio, consensus_type=consensus_type, min_out_scaffold=min_out_scaffold, 
+            output_chunks=output_chunks, memory=memory)
+        assembly_job = job("assembly_tips_"+ str(prev_anchor), dir=cur_dir).run('asm-core', prefix="base", module="notips-graph",
+            workdir=cur_dir, reads=reads, alignments_orig= alignments_job, anchor=max_anchor, min_anchor=prev_anchor, 
+            scaffolds_as_input=scaffolds_as_input, trim=trim, hub_cardinality=hub_cardinality, max_distance_diff=max_distance_diff, coverage=coverage,
+            repeat_resolution_depth=repeat_resolution_depth, path_expansion_depth=path_expansion_depth,
+            path_selection_ratio=path_selection_ratio, consensus_type=consensus_type, min_out_scaffold=min_out_scaffold, 
+            output_chunks=output_chunks, memory=memory)
+        assembly_pileup >> assembly_job
+        terminal_anchor_job = job("terminal_anchors_"+ str(cur_anchor), dir=cur_dir).bash('''
+            gem-aaa_terminal-reads2fasta ${reads} ${alignments} ${table} ${pileup} ${blocks_info} ${terminal_anchors} ${terminal_reads} ${prev_anchor_dec} ${cur_anchor} ${e}
+            ''',
+            _inputs={'reads':reads, 'alignments': alignments_job, 'table': assembly_job.output_table, 'pileup': assembly_job.output_pileup, 'blocks_info': assembly_job.output_blocks_info},
+            _options={'e': e, 'cur_anchor': cur_anchor, 'prev_anchor_dec': prev_anchor_dec},
+            _outputs={'terminal_anchors': "terminal-anchors.fa", 'terminal_reads': "terminal-reads" }
+            )
+    else:
+        # DO whole pipeline, maybe partition into several jobs
+        # Configure all parameters
+       
+        assembly_pileup = job("assembly_pileup_"+ str(cur_anchor), dir = cur_dir).run('asm-core', prefix="filtered", module="pileup", logname="pileup.log",
+            anchor=max_anchor, min_anchor=cur_anchor,  workdir=cur_dir, reads=reads, alignments_orig= alignments_job,
+            scaffolds_as_input=scaffolds_as_input, trim=trim, hub_cardinality=hub_cardinality, max_distance_diff=max_distance_diff, coverage=coverage,
+            repeat_resolution_depth=repeat_resolution_depth, path_expansion_depth=path_expansion_depth,
+            path_selection_ratio=path_selection_ratio, consensus_type=consensus_type, min_out_scaffold=min_out_scaffold, 
+            output_chunks=output_chunks, memory=memory)
+        assembly_graph = None
+        if hub_cardinality > 0:
+            assembly_graph = job("assembly_graph_"+ str(cur_anchor), dir = cur_dir).run('asm-core', prefix="filtered", module="simplified-graph", logname="graph.log",
+            anchor=max_anchor, min_anchor=cur_anchor,  workdir=cur_dir, reads=reads, alignments_orig= alignments_job,
+            scaffolds_as_input=scaffolds_as_input, trim=trim, hub_cardinality=hub_cardinality, max_distance_diff=max_distance_diff, coverage=coverage,
+            repeat_resolution_depth=repeat_resolution_depth, path_expansion_depth=path_expansion_depth,
+            path_selection_ratio=path_selection_ratio, consensus_type=consensus_type, min_out_scaffold=min_out_scaffold, 
+            output_chunks=output_chunks, memory=memory)
+        else:
+            assembly_graph = job("assembly_graph_"+ str(cur_anchor), dir = cur_dir).run('asm-core', prefix="base", module="basic-graph", logname="graph.log",
+            anchor=max_anchor, min_anchor=cur_anchor,  workdir=cur_dir, reads=reads, alignments_orig= alignments_job,
+            scaffolds_as_input=scaffolds_as_input, trim=trim, hub_cardinality=hub_cardinality, max_distance_diff=max_distance_diff, coverage=coverage,
+            repeat_resolution_depth=repeat_resolution_depth, path_expansion_depth=path_expansion_depth,
+            path_selection_ratio=path_selection_ratio, consensus_type=consensus_type, min_out_scaffold=min_out_scaffold, 
+            output_chunks=output_chunks, memory=memory)
+        assembly_pileup >> assembly_graph
+        assembly_repeats = assembly_graph
+        module_cutblocks="cutblocks"
+        if raw_graph_output:
+            module_cutblocks="blocks2fasta"
+        if repeat_resolution_depth != 0 or path_expansion_depth != 0 :
+            for i in range(0,repeat_rounds):
+                assembly_repeats = job("assembly_repeats_"+ str(cur_anchor) + "_round-" + str(i), dir = cur_dir).run('asm-core', prefix=assembly_graph.output_prefix, module="repeats", logname="repeats"+ str(i)+".log",
+                    anchor=max_anchor, min_anchor=cur_anchor, workdir=cur_dir, reads=reads, alignments_orig= alignments_job,
+                    scaffolds_as_input=scaffolds_as_input, trim=trim, hub_cardinality=hub_cardinality, max_distance_diff=max_distance_diff, coverage=coverage,
+                    repeat_resolution_depth=repeat_resolution_depth, path_expansion_depth=path_expansion_depth,
+                    path_selection_ratio=path_selection_ratio, consensus_type=consensus_type, min_out_scaffold=min_out_scaffold, 
+                    output_chunks=output_chunks, memory=memory)
+                assembly_graph >> assembly_repeats
+                assembly_graph = assembly_repeats
+            module_cutblocks+="-repeats"
+        assembly_solve = assembly_repeats
+        if path_selection_ratio != 0 :
+            assembly_solve = job("assembly_solve_"+ str(cur_anchor), dir = cur_dir).run('asm-core', prefix=assembly_repeats.output_prefix, module="solve", logname="solve.log",
+                anchor=max_anchor, min_anchor=cur_anchor,  workdir=cur_dir, reads=reads, alignments_orig= alignments_job,
+                scaffolds_as_input=scaffolds_as_input, trim=trim, hub_cardinality=hub_cardinality, max_distance_diff=max_distance_diff, coverage=coverage,
+                repeat_resolution_depth=repeat_resolution_depth, path_expansion_depth=path_expansion_depth,
+                path_selection_ratio=path_selection_ratio, consensus_type=consensus_type, min_out_scaffold=min_out_scaffold, 
+                output_chunks=output_chunks, memory=memory)
+            assembly_repeats >> assembly_solve
+        assembly_job = job("assembly_final_"+ str(cur_anchor), dir = cur_dir).run('asm-core', prefix=assembly_solve.output_prefix, module=module_cutblocks, logname="cutblocks.log",
+            anchor=max_anchor, min_anchor=cur_anchor,  workdir=cur_dir, reads=reads, alignments_orig= alignments_job,
+            scaffolds_as_input=scaffolds_as_input, trim=trim, hub_cardinality=hub_cardinality, max_distance_diff=max_distance_diff, coverage=coverage,
+            repeat_resolution_depth=repeat_resolution_depth, path_expansion_depth=path_expansion_depth,
+            path_selection_ratio=path_selection_ratio, consensus_type=consensus_type, min_out_scaffold=min_out_scaffold, 
+            output_chunks=output_chunks, memory=memory)
+        assembly_solve >> assembly_job
+
+        for o in range(output_chunks):
+             multiple_alignment_job = job("multiple_align_fasta-chunk-"+str(o), dir = cur_dir).bash('''
+                 cat ${fasta_in} | build_block_fasta.py > ${fasta_out}
+             ''',
+             _options={'fasta_in': cur_dir + "/${assembly_job.output_prefix}-sequence-by-block.fasta"+ str(o),
+                       'fasta_out': "${fasta_in}.fa"})
+             cat = None
+             if o > 0 :
+                 cat = job("cat_fasta-chunk-" + str(o)).bash('cat ${input} >> ${fasta_out}', input = multiple_alignment_job.fasta_out, _options = {"fasta_out": contigs})
+                 previous_cat >> cat
+             else:
+                cat = job("cat_fasta-chunk-" + str(o)).bash('cat ${input} > ${fasta_out}', input = multiple_alignment_job.fasta_out, _options = {"fasta_out": contigs})
+             if not debug:
+                clean_cat = job("clean_cat_fasta-chunk-" + str(o)).bash('rm ${input}', input = cat.input)
+                cat - clean_cat
+             previous_cat = cat   
+    prev_dir = cur_dir
+
+            
+
+
+
+ 
+
+    
+    
+

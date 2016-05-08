@@ -1,0 +1,126 @@
+#!/usr/bin/python 
+
+################################################################################
+### MODULES ####################################################################
+
+import sys
+from optparse import OptionParser
+import re
+
+################################################################### /MODULES ###
+################################################################################
+
+
+
+
+################################################################################
+### FUNCTIONS ##################################################################
+
+def wrap(seq,cpl):
+	l=len(seq)
+	for x in range(0,l,cpl):
+		print seq[x:x+cpl]
+
+################################################################# /FUNCTIONS ###
+################################################################################
+
+
+
+
+################################################################################
+### ARGUMENTS,OPTIONS ##########################################################
+
+parser = OptionParser(usage = "\n%prog [options]", version="%prog 0.1")
+
+parser.add_option(
+	"-i",
+	metavar = "FILE",
+	type = "string",
+	dest = "input_file",
+	default = 'stdin',
+	help = "input FASTA filename (default = 'stdin')"
+	)
+
+parser.add_option(
+	"-s",
+	metavar = "INT",
+	type = "int",
+	dest = "s_cut",
+	default = 1,
+	help = "smallest contig size allowed. Default = 1"
+	)
+
+parser.add_option(
+	"-b",
+	metavar = "INT",
+	type = "int",
+	dest = "b_cut",
+	default = 0,
+	help = "biggest contig size allowed. Default = 0 (infinite)"
+	)
+
+(opt, args) = parser.parse_args()
+
+######################################################### /ARGUMENTS,OPTIONS ###
+################################################################################
+
+
+
+
+################################################################################
+### CONSTANTS ##################################################################
+
+s = opt.s_cut
+b = opt.b_cut
+
+################################################################# /CONSTANTS ###
+################################################################################
+
+
+
+
+################################################################################
+### MAIN #######################################################################
+			
+if __name__ == "__main__":
+	sid = None
+	seq = ''
+	if opt.input_file != 'stdin':
+		ff = open(opt.input_file, 'r')
+	else:
+		ff = sys.stdin
+	for line in ff:
+		l = line[:-1]
+		if l != '':
+			if l[0] == '>':
+				if sid and len(seq)>= s:
+					if b:
+						if len(seq) <= b:
+							print '>' + sid
+							print seq
+					else:
+						print '>' + sid
+						print seq	
+				sid = l[1:]
+				seq = ''
+			else:
+				seq += l	
+		else:
+			continue
+
+	if sid and len(seq)>= s:
+		if b:
+			if len(seq) <= b:
+				print '>' + sid
+				print seq
+		else:
+			print '>' + sid
+			print seq	
+
+	if opt.input_file != 'stdin':
+		ff.close()
+
+	
+
+###################################################################### /MAIN ###
+################################################################################

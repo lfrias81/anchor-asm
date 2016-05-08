@@ -1,0 +1,138 @@
+#! jip 
+# Select reads to index
+#
+# Usage:
+#  gem-asm-select --prefix-input <prefix> --prefix-output <prefix> --chunks <chunks> -e <e> -m <m>  --anchors <list-of-anchors>... --use-small-reads 
+#
+# Options:
+#  --prefix-input <prefix>                Prefix for the input
+#  --prefix-output <prefix>               Prefix for the output
+#  -c --chunks <chunks>                   Number of chunks
+#  -e <e>                                 Base -e parameter for gem-mapper
+#  -m <m>                                 Base -m parameter for gem-mapper
+#  --anchors <list-of-anchors>...          List of anchors
+#  --use-small-reads                      Boolean option to keep the small reads if they are unique
+
+
+#%begin init
+# Register outputs
+add_output("output")
+add_option("indexes")
+
+#%end
+
+#%begin setup
+import os
+
+list_of_indexes = []
+for c in range(int(str(chunks))):
+    list_of_indexes.append(prefix_input + "-"+ str(c))
+options['indexes'].set(list_of_indexes)
+
+list_of_outputs = []
+for c in range(int(str(chunks))):
+    list_of_outputs.append(prefix_output + "-"+ str(c))
+options['output'].set(list_of_outputs)
+
+#%end
+
+#%begin validate
+import os
+for fasta in r(indexes):
+    os.path.exists(fasta)
+
+#%end
+
+#%begin pipeline
+import os
+
+selected_jobs = []
+selected_jobs_init = []
+#TODO adapt e and m so that they are more divergent assmaller the anchor
+
+anchor_iter = iter(r(anchors))
+cur_anchor = int(next(anchor_iter, None))
+for fasta_i, fasta in enumerate(r(indexes)):
+  selected = job("selected_biggest_" + os.path.basename(fasta)).bash('fasta_size_select_unwrapped -s ${small} -i ${fastafile}',
+                _options={"small": cur_anchor, "fastafile": fasta},
+                output = prefix_output + "-"+ str(fasta_i))
+  selected_jobs_init.append(selected)
+  selected_fasta = []
+  selected_jobs.append(selected_fasta)
+
+if use_small_reads :
+  clean_jobs = []
+  next_anchor_str = next(anchor_iter,None)
+  while next_anchor_str != None:
+      next_anchor = int(next_anchor_str)
+      index_jobs = []
+      rm_index_jobs = []
+      for fasta in r(indexes):
+          reads_to_index = job("to_index_" + str(cur_anchor) + "_" + os.path.basename(fasta)).bash('fasta_size_select_unwrapped -s ${small} -i ${fastafile}',
+              _options={"small": cur_anchor, "fastafile":fasta},
+               output = "${fastafile}.s${small}")
+          index = job("make_index_" + str(cur_anchor) + "_" + os.path.basename(fasta)).bash('gem-indexer --strip-unknown-bases-threshold ${big} -T $JIP_THREADS -i ${input} -o ${outfile|ext}',
+              _options={"big":cur_anchor-1}, 
+               input = reads_to_index,
+              _outputs={"log":"${input}.log"},
+               outfile="${input}.gem")
+          clean_index = job("clean_make_index_" +str(cur_anchor) + "_" + os.path.basename(fasta)).bash('rm ${input} ${log}',
+              input = reads_to_index,
+              _inputs = {"log": index.log})
+          index - clean_index
+          index_jobs.append(index)
+             
+      jobs_to_map = []
+      for fasta_i, fasta in enumerate(r(indexes)):
+           map_ending = str(fasta_i) + "_anchor-" + str(next_anchor) + "_" + str(cur_anchor)
+           reads_to_map = job("to_map_" + map_ending).bash('fasta_size_select_unwrapped -s ${small} -b ${big} -i ${fastafile}',
+              _options={"small":next_anchor, "big":str(cur_anchor-1), "fastafile":fasta},
+                               output = "${fastafile}.s${small}.fa"
+                              )
+           input_to_map = reads_to_map
+           for index_i, index in enumerate(r(index_jobs)):
+                this_ending = map_ending + "_index-" + str(index_i)
+                map_and_select = job("map_and_select_" + this_ending).bash('''
+       	         if [ -s ${input} ]; then cat ${input} | gem-mapper -I ${gem_index} -e ${e} -m ${m} -s 0 --fast-mapping -T $JIP_THREADS | sed 's/\t\t/\t/' | gt.filter --unmapped | map2fasta > ${outfile}; else cat ${input} > ${outfile}; fi
+     		         ''',
+                    input = input_to_map,
+                    _inputs={"gem_index": index},
+     		         _options={"fastafile": fasta, "anchor": next_anchor},
+                    outfile = "${fastafile}.s${anchor}.${gem_index|name|ext}"
+                    ) 
+                clean_map_and_select = job("clean_map_and_select_" + this_ending).bash('rm ${anchors}',
+                  _inputs= {"anchors":input_to_map})
+                input_to_map = map_and_select   
+                map_and_select - clean_map_and_select
+           cat_selected = job("cat_selected_" + map_ending).bash('cat ${input}', input = input_to_map, 
+                                _options={"fastafile": fasta, "anchor": next_anchor},
+                                output = "${fastafile}.selected.s${anchor}")	
+           selected_jobs[fasta_i].append(cat_selected)
+
+           clean_map_and_select = job("clean_map_and_select_" + map_ending).bash('rm ${anchors}',
+                  _inputs= {"anchors":input_to_map})  
+           cat_selected - clean_map_and_select
+      # Rm indexes after using them
+      for index in index_jobs:
+          rm_index = job("rm_make_index_" +  str(fasta_i) + "_anchor-" + str(cur_anchor)).bash('rm ${input}',
+              input = index)
+          for i in selected_jobs[fasta_i]:
+            i >> rm_index
+            # TEST to avoid cascading
+            #rm_index=i
+
+      cur_anchor = next_anchor
+      next_anchor_str = next(anchor_iter,None)
+
+        
+  all_output_jobs = []
+  for fasta_i, fasta_output in enumerate(r(output)):
+      previous_cat = selected_jobs_init[fasta_i]
+      for i, selected in enumerate(selected_jobs[fasta_i]):
+           cat = job("cat_" + os.path.basename(str(selected))).bash('cat ${input} >> ${fasta_output}', input = selected, _options = {"fasta_output": fasta_output})
+           clean_cat = job("clean_cat_" + os.path.basename(str(selected))).bash('rm ${input}', input = selected)
+           cat - clean_cat
+           previous_cat >> cat
+           previous_cat = cat    
+     
+#%end

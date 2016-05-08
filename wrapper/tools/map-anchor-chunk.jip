@@ -1,0 +1,24 @@
+#! jip
+# Usage:
+#   map-anchor-chunk -I <index> -i <anchors> -D <D> -d <d> -e <e> -m <m> -s <s> --extra <extra> [-o <output>]
+#
+# Inputs:
+#   -I --index <index>            Index created by gem-indexer
+#   -i --anchors <anchors>          Fasta/Fastq file containing the anchors
+#
+# Options:
+#   -D <D>                D parameter as in gem-mapper
+#   -d <d>                d parameter as in gem-mapper
+#   -e <e>                e parameter as in gem-mapper
+#   -m <m>                m parameter as in gem-mapper
+#   -s <s>                s parameter as in gem-mapper
+#   --extra  <extra>      Extra mapping parameter for gem-mapper
+#  	-o --output <output>  Output of the method
+#						  [default: stdout]
+#%command
+
+# Maps and cleans the presents
+gem-mapper -I ${index} -i ${anchors} -D ${D} -d ${d} -e ${e} -m ${m} -s ${s} --mismatch-alphabet "ACGTN" -T $JIP_THREADS ${extra} | sed 's/\t\t/\t/' | gem-aaa_clean-maps ${s} ${s} ${s} ${s} $JIP_THREADS ${output|arg("> ${output}")}
+# stub so it does not crash..
+stub=0
+

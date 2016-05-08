@@ -1,0 +1,52 @@
+{
+  "outputParameters": {
+    "consensusType": "majority", 
+    "rawGraphOutput": true, 
+    "minOutScaffold": 20, 
+    "outputChunks": 1
+  }, 
+  "graphParameters": {
+    "trim": 20, 
+    "maxDistanceDiff": 0.05, 
+    "pathExpansionDepth": 10, 
+    "repeatRounds": 1, 
+    "repeatResolutionDepth": 4, 
+    "pathSelectionRatio": 0, 
+    "hubCardinality": 0
+  }, 
+  "mappingParameters": {
+    "extraMappingParameters": "", 
+    "mappingChunks": "1", 
+    "anchorsXChunk": 67245093, 
+    "divergence": 0.01, 
+    "minIndexChunks": 1, 
+    "maxSizeOfIndexChunk": 10000000000, 
+    "maxMapsXAnchor": 1000, 
+    "indexChunks": "1", 
+    "minMapsXAnchor": 0
+  }, 
+  "json": {
+    "debugMode": false, 
+    "jsonFile": "config.json"
+  }, 
+  "mainParameters": {
+    "anchors": [
+      40, 
+      20
+    ], 
+    "anchorSpacing": 40, 
+    "scaffoldsAsInput": true, 
+    "useSmallReads": true, 
+    "coverage": 1, 
+    "memory": 48000000000
+  }, 
+  "input": {
+    "matePairedReads": null, 
+    "singleEndReads": null, 
+    "pairedReads": null, 
+    "asmDirectory": "test", 
+    "inputScaffolds": [
+      "lala.fa"
+    ]
+  }
+}

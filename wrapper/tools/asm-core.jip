@@ -1,0 +1,240 @@
+#! jip
+#
+# Usage:
+#   asm-core --workdir <workdir> [--reads <reads>] [--alignments-orig <alignments>] [--bindir <bindir>] [--logname <logname>] [-a <anchor>] [--min-anchor <min-anchor>]
+#			 [--scaffolds-as-input] [--hub-cardinality <cardinality>] [-c <coverage>] [--trim <trim>] 
+#			 [--max-distance-diff <percentage>] [--repeat-resolution-depth <depth>] [--path-expansion-depth <depth>] 
+#			 [--path-selection-ratio <ratio>] [--consensus-type <consensus-type>] [--min-out-scaffold <min-out-scaffold>] 
+#			 [--output-chunks <output-chunks> ] [-m <memory>] --module <module> [--prefix <prefix>]	 	
+#
+# Inputs:
+#	  --reads <file>							Binary file containing the reads
+#												[default: ${workdir}/reads]
+#	  --alignments-orig							Binary file containing the alignments
+#												[default: ${workdir}/alignments.orig]
+#	  --workdir <workdir>						Path of the directory where the script must be run
+#	  --bindir <bindir>	 						Optional path directories to search for the binaries
+#
+# Outputs:
+#	  --logname <logname>						The logname file
+#												[default: ${workdir}/asm.log]
+#
+# Options: 
+#	  -a, --anchor <anchor>						Anchor size
+# 	  --min-anchor <min-anchor> 				Min anchor size
+#												[default: ${anchor}]
+#	  --scaffolds-as-input						Input to the assembly are scaffolds		
+#												[default: true]
+#	  --hub-cardinality <cardinality>			Node cardinality to be considered a hub, and so candidate to be removed		
+#												[default: 16]							
+#	  -c, --coverage <coverage> 				Min coverage to keep a tip or singleton
+#												[default: 2]
+#     --trim <trim>								Max length for a tip to be trimmed independent of coverage
+#												[default: ${min_anchor}]
+#	  --max-distance-diff <percentage>			Maximum distance difference (in 1) for two paths to be equivalent
+#												[default: 0.04]
+#	  --repeat-resolution-depth <depth>			Repeat resolution maximum search depth
+#												[default: 4]
+#	  --path-expansion-depth <depth>			Try to expand a path at most till depth
+#												[default: 10]
+#	  --path-selection-ratio <ratio>			Minimum coverage ratio to select a path, with respect to another.
+#												[default: 0.5]
+#	  --consensus-type <consensus-type>			Consensus type: 'majority' | 'longest'
+#												[default: 'majority']
+# 	  --min-out-scaffold <min-out-scaffold>		Min output scaffold
+#												[default: 200]
+#	  --output-chunks <output-chunks>			Num output chunks
+#												[default: 1]
+#     -m, --memory <memory>	 					Max memory available in GB
+#							 					[default: 4]
+#	  --module <module>							Which module needs to be executed. Can be any of: 'pileup', 'basic-graph', 'notips-graph',
+#	 												'simplified-graph', 'clean', 'clean-repeats', 'remove-tips', 'repeats', 'scaffold', 'solve', 
+#													'cutblocks', 'cutblocks-repeats', 'remove-paired-links' 'blocks2fasta',
+#													 'blocks2fasta-repeats', 'explorer', 'terminals', 'core-pipeline', 'stats'							
+#	  --prefix <prefix>							Prefix name for input
+
+#%begin init
+
+## TODO: add additional inputs and outputs, I just added the essential to communicate 
+##### Inputs and output that depend on the operation (the results (which depend on the prefix))
+
+#The programs use a percentage, instead of adding an option, it would be better to change the program
+add_option('max_distance_diff_perc')
+
+add_option('input_table', None, 1, False)
+add_option('input_pileup', None, 1, False)
+add_option('input_blocks_info', None, 1, False)
+
+add_output('output_alignments', None, 1, False)
+add_output('output_table', None, 1, False)
+add_output('output_pileup', None, 1, False)
+add_output('output_blocks_info', None, 1, False)
+
+add_output('in_out_stats', None, 1, False)
+add_output('degree_stats', None, 1, False)
+add_output('length_stats', None, 1, False)
+add_output('degree_length_stats', None, 1, False)
+add_output('coverage_stats', None, 1, False)
+add_output('all_lengths', None, 1, False)
+# Register outputs
+add_output("output_fasta", None, 1, False)
+
+add_option("output_prefix", None, 1, False)
+
+#%end
+
+#%begin setup
+
+def add_basic_inputs(options, pref_dir):
+	options['input_table'].set("${workdir}/" + pref_dir  + "-table")
+	options['input_pileup'].set("${workdir}/" + pref_dir  + "-pileup")
+	options['input_blocks_info'].set("${workdir}/" + pref_dir + "-blocks-info")
+
+def add_basic_outputs(options, pref_dir):
+	options['output_prefix'].set(pref_dir)
+	options['output_table'].set("${workdir}/" + pref_dir + "-table")
+	options['output_pileup'].set("${workdir}/" + pref_dir + "-pileup")
+	options['output_blocks_info'].set("${workdir}/" + pref_dir + "-blocks-info")
+
+def add_stats_output(options, pref_dir):
+	options['in_out_stats'].set("${workdir}/" + pref_dir + "-in-out-stats")
+	options['degree_stats'].set("${workdir}/" + pref_dir + "-degree-stats")
+	options['length_stats'].set("${workdir}/" + pref_dir + "-length-stats")
+	options['degree_length_stats'].set("${workdir}/" + pref_dir + "-degree-length-stats")
+	options['coverage_stats'].set("${workdir}/" + pref_dir + "-coverage-stats")
+	options['all_lengths'].set("${workdir}/" + pref_dir + "-all-lengths" )
+
+
+def add_fasta_output(options,prefix_output, chunks):
+	list_of_outputs = []
+	for c in range(int(str(chunks))):
+		list_of_outputs.append(prefix_output + "-sequence-by-block.fasta"+ str(c))
+	options['output_fasta'].set(list_of_outputs)
+
+dirpre = "${prefix}" 
+
+if module == "pileup":
+	options['output_alignments'].set("${workdir}/alignments.sorted")
+elif module == "simplified-graph":
+	add_basic_outputs(options, "filtered-nobubble")
+elif module == "basic-graph":
+	add_basic_outputs(options, "base-nobubble")
+elif module == "clean" :
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-nobubble")
+elif module == "clean-repeats":
+	add_basic_inputs(options, dirpre + "-norepeats")
+	add_basic_outputs(options, dirpre+ "-norepeats-nobubble")
+elif module == "remove-tips":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-notips")
+elif module == "repeats":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-norepeats-nobubble")
+elif module == "scaffold":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-with-pairs-nobubble")
+elif module == "solve":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-solved")
+elif module == "cutblocks" or module == "cutblocks-repeats":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-non-overlapping")
+	add_fasta_output(options, dirpre+ "-non-overlapping", output_chunks)
+elif module == "remove-paired-links":
+	add_basic_inputs(options, dirpre)
+	add_basic_outputs(options, dirpre+ "-nobubble")
+elif module == "blocks2fasta" or module == "blocks2fasta-repeats":
+	add_basic_inputs(options, dirpre)
+	options['output_prefix'].set(dirpre)
+	add_fasta_output(options, dirpre, output_chunks)
+elif module == "explorer":
+	add_basic_inputs(options, dirpre)
+elif module	== "terminals":
+	add_basic_inputs(options, dirpre)
+elif module == "notips-graph":
+	add_basic_outputs(options, "base-notips")
+elif module == "core-pipeline":
+	add_basic_outputs(options, dirpre+ "-nobubble-norepeats-nobubble-non-overlapping")
+	add_fasta_output(options, dirpre+ "-nobubble-norepeats-nobubble-non-overlapping", output_chunks)
+elif module == "stats":
+	add_basic_inputs(options, dirpre)
+	add_stats_output(options,dirpre)
+
+
+
+
+# Set variables in terms of others
+options['memory'] = options['memory'].get(int) * 1024 * 1024 * 1024
+if not options['min_anchor']:
+	options['min_anchor'] = options['anchor']
+if not options['trim']:
+	options['trim']=options['min_anchor']
+if not options['consensus_type']:
+	options['consensus_type']='majority'
+if not options['reads']:
+	options['reads'] = options['workdir']+"/reads"
+if not options['alignments_orig']:
+	options['alignments_orig'] = options['workdir']+"/alignments.orig"
+if not options['logname']:
+	options['logname'] = options['workdir']+"/asm.log"
+
+
+options['max_distance_diff_perc'].set(int(options['max_distance_diff'].get(float)*100))
+
+#%end
+
+
+#%begin validate
+# Check the option is valid
+not_is_valid=module.get() != "pileup" and module.get()!='notips-graph' and module.get()!='basic-graph' and  module.get()!='simplified-graph' and module.get()!='clean' and module.get()!='clean-repeats' and module.get()!='remove-tips' and module.get()!='repeats' and module.get()!='scaffold' and module.get()!='solve' and module.get()!='cutblocks' and module.get()!='cutblocks-repeats' and module.get()!='remove-paired-links' and module.get()!='blocks2fasta' and module.get()!='blocks2fasta-repeats' and module.get()!='explorer' and module.get()!='terminals' and module.get()!='core-pipeline' and module.get()!='stats'
+if not_is_valid:
+    validation_error("Not valid module")
+
+import os
+if input_table.get() != None:
+    os.path.exists(input_table.get())
+if input_pileup.get() != None:
+    os.path.exists(input_pileup.get())
+if input_blocks_info.get() != None:
+    os.path.exists(input_blocks_info.get())    
+
+#%end
+
+#%command
+
+# export all variables, workaround
+
+export reads=${reads}
+export alignments_orig=${alignments_orig}
+export workdir=${workdir}
+export bindir=${bindir}	 						
+export logname=${logname}						
+export anchor=${anchor}		
+export min_anchor=${min_anchor}
+export scaffolds_as_input=${scaffolds_as_input|arg("1")|else("0")}
+export hub_cardinality=${hub_cardinality}	
+export coverage=${coverage}
+export trim=${trim}
+export max_distance_diff=${max_distance_diff}
+export repeat_resolution_depth=${repeat_resolution_depth}
+export path_expansion_depth=${path_expansion_depth}			
+export path_selection_ratio=${path_selection_ratio}
+export consensus_type=${consensus_type}
+export min_out_scaffold=${min_out_scaffold}
+export output_chunks=${output_chunks}
+export memory=${memory}
+export module=${module}
+export prefix=${prefix}
+export max_distance_diff_perc=${max_distance_diff_perc}
+export input_table=${input_table}
+export input_pileup=${input_pileup}
+export input_blocks_info=${input_blocks_info}
+export output_alignments=${output_alignments}
+export output_table=${output_table}
+export output_blocks_info=${output_blocks_info}
+export output_prefix=${output_prefix}
+
+asm-core.sh
+
+
