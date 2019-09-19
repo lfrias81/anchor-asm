@@ -14,7 +14,7 @@ for the worst case is presented. We use the following input parameters:
 
   - \(k\): anchor length
 
-![Figure 1](https://github.com/talioto/anchor-asm/edit/patch-1/wrapper/images/fig1.png "Figure 1")
+![Figure 1](images/fig1.png)
 
 A description of each module follows.
 
