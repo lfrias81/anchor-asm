@@ -18,7 +18,7 @@ for the worst case is presented. We use the following input parameters:
 
 A description of each module follows.
 
-## Setup
+## <span id="setup" label="setup">Setup</span>
 
 The basic internal data structures are created given user-defined
 parameters. Mainly:
@@ -98,7 +98,7 @@ collected, and an edge or *link* is output between them.
 
 This step requires \(O(r)\) memory and \(O(A)\) time.
 
-#### Merge links. <span id="mergelinks" label="mergelinks">\[mergelinks\]</span>
+#### <span id="mergelinks" label="mergelinks">Merge links.</span>
 
 An equivalent link between two anchors might have been created in
 different positions of the pileup. Here, we eliminate redundant links,
@@ -109,7 +109,7 @@ divergence.
 Let \(l\) be the total number of input links, and \(c\) the number of
 chunks, this step requires \(O(l c)\) time and O\((l/c)\) space.
 
-#### Block graph. <span id="blockgraph" label="blockgraph">\[blockgraph\]</span>
+#### <span id="blockgraph" label="blockgraph">Block graph.</span>
 
 Unambiguous sequential anchor paths are detected and stored as a pileup.
 They are called *blocks* and made up the nodes of the block graph. The
@@ -158,7 +158,7 @@ The pruned graph is compacted using the *Block Graph* module in
 Section [\[blockgraph\]](#blockgraph). Note that the resulting `pileup`
 and `table` files refer to blocks instead of anchors.
 
-#### Blocks2anchor.<span id="block2anchor" label="block2anchor">\[block2anchor\]</span>
+#### <span id="block2anchor" label="block2anchor">Blocks2anchor.</span>
 
 `pileup` and `table` files of a graph \(G'\) described in terms of
 blocks of a graph \(G\) are translated into `pileup` and `table` files
@@ -168,7 +168,7 @@ contents of \(G'\) blocks are output in order.
 
 This transformation requires \(O(a \log a)\) time and \(O(a)\) space.
 
-#### Terminal reads and anchors. <span id="terminal" label="terminal">\[terminal\]</span>
+#### <span id="terminal" label="terminal">Terminal reads and anchors.</span>
 
 For every terminal block end, the fragments of reads contained up to a
 given user defined size are output. Besides, the sequence of new
@@ -194,9 +194,8 @@ time.
 
 The new anchors are mapped to the reads in the tips.
 
-Then, the alignments are postprocessed analogously as in the Setup (see
-Section  [1.1](#setup)) and the corresponding `alignments` file is
-created.
+Then, the alignments are postprocessed analogously as in the [Setup](#setup)) 
+and the corresponding `alignments` file is created.
 
 Finally, the contents of the latter `alignments` file are merged with
 the global `alignments` file. The list of read fragments in terminals is
