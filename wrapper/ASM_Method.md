@@ -194,7 +194,7 @@ time.
 
 The new anchors are mapped to the reads in the tips.
 
-Then, the alignments are postprocessed analogously as in the [Setup](#setup)) 
+Then, the alignments are postprocessed analogously as in the [Setup](#setup)
 and the corresponding `alignments` file is created.
 
 Finally, the contents of the latter `alignments` file are merged with
@@ -231,7 +231,7 @@ times.
 
 We describe them in the following.
 
-#### Clean graph.
+#### <span id="clean" label="clean">Clean graph.</span>
 
 Given an input graph, bubbles, tips and spurious direct paths are
 removed if matching the user specified criteria, in particular coverage.
