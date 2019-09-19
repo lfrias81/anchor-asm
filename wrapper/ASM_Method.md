@@ -88,7 +88,7 @@ The whole alignments file needs to be read for each chunk to place the
 alignments accordingly, so \(O(Ac)\) time and \(O(A/c)\) memory is
 required.
 
-#### Anchor graph. <span id="anchorgraph" label="anchorgraph">\[anchorgraph\]</span>
+#### <span id="anchorgraph" label="anchorgraph">Anchor graph.</span>
 
 The sorted alignments file is processed online to create a graph of
 consecutive anchors in reads. Given the processed anchors at a point,
