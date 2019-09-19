@@ -83,7 +83,7 @@ sort the (sub)anchors and then the alignments. All the anchors are
 loaded into memory whilst the alignments are loaded into \(c\) chunks of
 size \(O(A/c)\).
 
-The actual sorting needs \(O(a)\) memory and \(O(a\text{log} a)\) time.
+The actual sorting needs \(O(a)\) memory and \(O(a log a)\) time.
 The whole alignments file needs to be read for each chunk to place the
 alignments accordingly, so \(O(Ac)\) time and \(O(A/c)\) memory is
 required.
