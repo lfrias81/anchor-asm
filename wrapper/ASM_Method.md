@@ -166,7 +166,7 @@ made up by anchors using the graph \(G\) composition. First, the anchor
 content of \(G'\) is collected processing online \(G\) blocks. Then, the
 contents of \(G'\) blocks are output in order.
 
-This transformation requires \(O(a \log a)\) time and \(O(a)\) space.
+This transformation requires \(O(a log a)\) time and \(O(a)\) space.
 
 #### <span id="terminal" label="terminal">Terminal reads and anchors.</span>
 
@@ -187,7 +187,7 @@ and the sequence of the new anchors.
 
 Let \(c\) the number of chunks, \(A_t\) the total number of alignments
 in terminal blocks, \(a_t\) the number of anchors in terminal blocks,
-this step takes \(O(R + A_t/c)\) space and \(O(c A + a_t \log a_t)\)
+this step takes \(O(R + A_t/c)\) space and \(O(c A + a_t log a_t)\)
 time.
 
 #### Updating alignments.
@@ -204,7 +204,7 @@ suppressing the bigger anchors containing terminal read fragments.
 Finally, the new smaller anchors are output.
 
 Let \(r_t\) be the number of reads in terminal reads, merging the files
-requires \(O(r_t)\) space and \(O(A + a \log r_t )\) time.
+requires \(O(r_t)\) space and \(O(A + a log r_t )\) time.
 
 ## Graph filtering
 
@@ -250,11 +250,11 @@ Finally, tips are removed based on coverage and length.
 
 Let \(l\) be the total number of input links in the graph, let \(b\) the
 total number of blocks, let \(d\) the biggest node cardinality, let
-\(i\) the total number of iterations, let \(\delta\) the search depth
+\(i\) the total number of iterations, let \(&delta;\) the search depth
 for equivalent paths, this step requires \(O(l)\) space and
-\(O(i b d^\delta)\) time. Note that \(d^\delta\) is an upper bound. In
+\(O(i b d^&delta;)\) time. Note that \(d^&delta;\) is an upper bound. In
 general, most of nodes have a small cardinality and the search finishes
-much earlier than \(\delta\) steps for most branches.
+much earlier than \(&delta;\) steps for most branches.
 
 #### Repeat resolution and scaffolding.
 
@@ -291,9 +291,9 @@ to minimize bubble expansion. The algorithm considers each repeat like
 block and tries to find an unambiguous crossing path from one direct
 neighbour and with enough support. The path is built by read threading
 or by finding a path to a pair related block. When searching a path, at
-most \(\delta\) blocks further are considered to avoid exponential
+most \(&delta;\) blocks further are considered to avoid exponential
 explosion. This is repeated until the graph cannot be refined further or
-\(\iota\) iterations have been performed, where \(\iota\) is a user
+\(&iota;\) iterations have been performed, where \(&iota;\) is a user
 defined parameter.
 
 Then, the graph is simplified further by building paths from seed nodes.
@@ -308,7 +308,7 @@ seed nodes reachable from it are kept.
 Let \(B\) be the total number of alignments at block ends, let \(l_G\)
 be the total number of links in G, let \(d\) the biggest node
 cardinality, this step require \((B + l)\) space and
-\(O(\iota B d^\delta)\) time. Note as with Clean Graph module (see
+\(O(&iota; B d^&delta;)\) time. Note as with Clean Graph module (see
 Section [\[clean\]](#clean)), the latter is an upper bound which in
 practice is not achieved.
 
@@ -368,15 +368,15 @@ outputting the fasta.
 
 A class graph is translated into a *block of blocks graph*. First, the
 correspondence from classes to non overlapping blocks are loaded into
-memory. Then, each block \(\beta\) of the overlapping graph \(G\) is
-processed online. Each of the end overlapping positions of \(\beta\) are
+memory. Then, each block \(&beta;) of the overlapping graph \(G\) is
+processed online. Each of the end overlapping positions of \(&beta;) are
 translated into classes, and then, to non overlapping blocks, in which
-\(\beta\) is recorded. Finally, the contents of the non overlapping
+\(&beta;) is recorded. Finally, the contents of the non overlapping
 blocks in terms of \(G\) are output.
 
 Let \(c\) be the total number of classes, let \(b_o\) be the total
 number of overlapping blocks in the non overlapping graph, this step
-takes \(O(b_o \log b_o)\) time and \(O(c + b_o)\) space.
+takes \(O(b_o log b_o)\) time and \(O(c + b_o)\) space.
 
 Finally the block of blocks graph is translated into a block (of
 anchors) graph as in Section [\[block2anchor\]](#block2anchor).
@@ -406,4 +406,4 @@ snp analyses, but this is not currently implemented.
 
 Let \(c\) the number of chunks, \(A_c\) the total number of alignments
 in a chunk, this step takes \(O(A_c + R)\) space, and
-\(O(c A + a \log a + R)\) time.
+\(O(c A + a log a + R)\) time.
