@@ -1,7 +1,6 @@
 # Algorithm and implementation details
 
-The general pipeline is shown in
-Figure [\[fig:Pipeline\]](#fig:Pipeline). We use asymptotic notation to
+The general pipeline is shown in Figure 1. We use asymptotic notation to
 describe the complexity of each step. If not otherwise stated, the cost
 for the worst case is presented. We use the following input parameters:
 
@@ -14,6 +13,8 @@ for the worst case is presented. We use the following input parameters:
   - \(A\): total number of alignments
 
   - \(k\): anchor length
+
+![Figure 1](https://github.com/talioto/anchor-asm/edit/patch-1/wrapper/images/fig1.png "Figure 1")
 
 A description of each module follows.
 
